@@ -65,7 +65,10 @@ class ObjectFT(QSplitter):
     def updateXAxes(self, xMin=0, xMax=1000):
         self.plot.set_axis_limits('bottom', xMin, xMax)
         
-    
+    @Slot(object, object)
+    def updateYAxes(self, yMin=0, yMax=1000):
+        self.plot.set_axis_limits('left', yMin, yMax)
+        
     @Slot(object)
     def updatePlot(self, data):
         self.curve.setData(data[:,0], data[:,1])
@@ -83,7 +86,8 @@ class TiePieUi(QSplitter):
     Handling user interface to manage TiePie HS4/Diff Oscilloscope
     '''
     scpConnected = Signal()
-    axisChanged = Signal(object, object)
+    xAxisChanged = Signal(object, object)
+    yAxisChanged = Signal(object, object)
     def __init__(self, parent):
         #super(ObjectFT, self).__init__(Qt.Vertical, parent)
         super().__init__(parent)
@@ -96,18 +100,23 @@ class TiePieUi(QSplitter):
         layoutWidget.setLayout(layout)
 
         self.openDevBtn = QPushButton('Open Osci')
+        # channel stuff
         self.measCh = QComboBox()
-        #self.measCh.addItems(('Ch1', 'Ch2', 'Ch3', 'Ch4'))
         self.chSens = QComboBox()
         self.triggCh = QComboBox()
-        self.triggLevel =  QLineEdit()
-        self.triggLevel.setValidator(QDoubleValidator(0, 1, 3))
         self.frequency  = QLineEdit()
         self.frequency.setValidator(QIntValidator())
         self.recordLen = QLineEdit()
         self.recordLen.setValidator(QIntValidator())
         self.delay = QLineEdit()
         self.delay.setValidator(QDoubleValidator())
+        # trigger stuff
+        self.triggLevel =  QLineEdit()
+        self.triggLevel.setValidator(QDoubleValidator(0, 1, 3))
+        self.hystereses = QLineEdit()
+        self.hystereses.setValidator(QDoubleValidator(0, 1, 3))
+        self.triggKind = QComboBox()     
+        # do averages
         self.averages = QSpinBox()
         self.averages.setValue(1)
         self.averages.setRange(1, 10000)
@@ -118,27 +127,33 @@ class TiePieUi(QSplitter):
         layout.addWidget(self.measCh, 1, 1)
         layout.addWidget(QLabel('Ch sensitivity'), 2, 0)
         layout.addWidget(self.chSens, 2, 1)
-        layout.addWidget(QLabel('Trigger Ch'), 3, 0)
-        layout.addWidget(self.triggCh, 3, 1)
-        layout.addWidget(QLabel('Trigger Level'), 4, 0)
-        layout.addWidget(self.triggLevel, 4, 1)
-        layout.addWidget(QLabel('Sample freq. (kHz)'), 5, 0)
-        layout.addWidget(self.frequency, 5, 1)
-        layout.addWidget(QLabel('Record length'), 6, 0)
-        layout.addWidget(self.recordLen, 6, 1)
-        layout.addWidget(QLabel('Delay'), 7, 0)
-        layout.addWidget(self.delay, 7, 1)
-        layout.addWidget(QLabel('Averages'), 8, 0)
-        layout.addWidget(self.averages, 8, 1)
-        layout.setRowStretch(9, 10)
+        layout.addWidget(QLabel('Sample freq. (kHz)'), 3, 0)
+        layout.addWidget(self.frequency, 3, 1)
+        layout.addWidget(QLabel('Record length'), 4, 0)
+        layout.addWidget(self.recordLen, 4, 1)
+        layout.addWidget(QLabel('Delay'), 5, 0)
+        layout.addWidget(self.delay, 5, 1)
+        layout.addWidget(QLabel('Trigger Ch'), 6, 0)
+        layout.addWidget(self.triggCh, 6, 1)
+        layout.addWidget(QLabel('Trigger Level'), 7, 0)
+        layout.addWidget(self.triggLevel, 7, 1)
+        layout.addWidget(QLabel('Hystereses'), 8, 0)
+        layout.addWidget(self.hystereses, 8, 1)
+        layout.addWidget(QLabel('Trigger kind'), 9, 0)
+        layout.addWidget(self.triggKind, 9, 1)
+        layout.addWidget(QLabel('Averages'), 10, 0)
+        layout.addWidget(self.averages, 10, 1)
+        layout.setRowStretch(11, 10)
         layout.setColumnStretch(2,10)
 
         self.addWidget(layoutWidget)
 
         # connect UI to get things working
         self.openDevBtn.released.connect(self.openDev)
+        self.chSens.currentIndexChanged.connect(self._changeSens)
         self.frequency.returnPressed.connect(self._changeFreq)
         self.recordLen.returnPressed.connect(self._changeRecordLength)
+        self.hystereses.returnPressed.connect(self._setHystereses)
 
     def openDev(self):
         # search for devices
@@ -172,7 +187,7 @@ class TiePieUi(QSplitter):
 
             # Enable channel 1 for measurement
             self.scp.channels[0].enabled = True
-            self.scp.range = 8
+            self.scp.range = 0.2
             self.scp.coupling = libtiepie.CK_DCV # DC Volt
             
             # Disable all channel trigger sources
@@ -187,18 +202,25 @@ class TiePieUi(QSplitter):
 
             
             # update UI
+            # channel
             self.measCh.addItems(['Ch{:d}'.format(i) for i in range(self.scp.channels.count)])
             self.chSens.addItems(['{:.1f} V'.format(i) for i in self.scp.channels[0].ranges])
-            self.triggCh.addItems(['Ch{:d}'.format(i) for i in range(self.scp.channels.count)])
             self.frequency.setValidator(QIntValidator(1, 1e-3*self.scp.sample_frequency_max))
             self.frequency.setText('{:d}'.format(int(self.scp.sample_frequency*1e-3)))
-            self.triggLevel.setText(str(ch.trigger.levels[0]))
             self.recordLen.setValidator(QIntValidator(1, self.scp.record_length_max))
             self.recordLen.setText('{:d}'.format(self.scp.record_length))
+            # trigger
+            self.triggCh.addItems(['Ch{:d}'.format(i) for i in range(self.scp.channels.count)])
+            self.triggLevel.setText(str(ch.trigger.levels[0]))
+            self.hystereses.setText(str(ch.trigger.hystereses[0]))
+            self.triggKind.addItems(['{:s}'.format(i) for i in 
+                libtiepie.trigger_kind_str(ch.trigger.kinds).split(', ')])
+            
             self.openDevBtn.setEnabled(False)
             
             # the world that the scope is connected
-            self.axisChanged.emit(0, 1/int(self.frequency.text())*1e-3*int(self.recordLen.text()))
+            self.xAxisChanged.emit(0, 1/int(self.frequency.text())*1e-3*int(self.recordLen.text()))
+            self.yAxisChanged.emit(-1*self.scp.range, self.scp.range)
             self.scpConnected.emit()
             
         else:
@@ -219,6 +241,12 @@ class TiePieUi(QSplitter):
                             self.scp.record_length)
             return np.column_stack((x, y))
 
+    #@Slot
+    def _changeSens(self, i):
+        with QMutexLocker(self.mutex):
+            self.scp.range = self.scp.channels[0].ranges[i]
+            self.yAxisChanged.emit(-1*self.scp.range, self.scp.range)
+            
     def _changeFreq(self):
         with QMutexLocker(self.mutex):
             self.scp.sample_frequency = int(self.frequency.text())*1e3
@@ -228,6 +256,11 @@ class TiePieUi(QSplitter):
         with QMutexLocker(self.mutex):
             self.scp.record_length = int(self.recordLen.text())
             self.axisChanged.emit(0, 1/self.scp.sample_frequency*self.scp.record_length)
+
+    def _setHystereses(self):
+        with QMutexLocker(self.mutex):
+            self.scp.hystereses = float(self.hystereses.text())
+        
 
      
 class PiStageUi(QSplitter):
@@ -520,7 +553,8 @@ class MainWindow(QMainWindow):
         # connect signals
         #self.piUi.stageConnected.connect(self.s)
         self.tiepieUi.scpConnected.connect(self.startOsciThr)
-        self.tiepieUi.axisChanged.connect(self.osciSignal.updateXAxes)
+        self.tiepieUi.xAxisChanged.connect(self.osciSignal.updateXAxes)
+        self.tiepieUi.yAxisChanged.connect(self.osciSignal.updateYAxes)
         self.osciThr = GenericThread(self.getOsciData)
         self.updateOsciPlot.connect(self.osciSignal.updatePlot)
         
