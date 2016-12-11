@@ -16,7 +16,7 @@ from guidata.qt.QtGui import (QMainWindow, QMessageBox, QSplitter, QComboBox,
                               QTabWidget, QLabel, QLineEdit,
                               QDoubleValidator, QIntValidator, QValidator,
                               QMenu, QApplication, QCursor, QFont, QPushButton,
-                              QSlider, QIcon)
+                              QSlider, QIcon, QFrame, QSizePolicy)
 from guidata.qt.QtCore import (Qt, QT_VERSION_STR, PYQT_VERSION_STR, Signal,
                                Slot, QThread, QMutex, QMutexLocker, QLocale)
 from guidata.qt import PYQT5
@@ -28,16 +28,17 @@ import os.path as osp
 import os
 import numpy as np
 import time
+from scipy.constants import c
 
-from guidata.dataset.datatypes import DataSet, ValueProp
-from guidata.dataset.dataitems import (IntItem, FloatArrayItem, StringItem,
-                                       ChoiceItem, FloatItem, DictItem,
-                                       BoolItem)
-from guidata.dataset.qtwidgets import DataSetEditGroupBox
+#from guidata.dataset.datatypes import DataSet, ValueProp
+#from guidata.dataset.dataitems import (IntItem, FloatArrayItem, StringItem,
+#                                       ChoiceItem, FloatItem, DictItem,
+#                                       BoolItem)
+#from guidata.dataset.qtwidgets import DataSetEditGroupBox
 from guidata.configtools import get_icon
 from guidata.qthelpers import create_action, add_actions, get_std_icon
 from guidata.qtwidgets import DockableWidget, DockableWidgetMixin
-from guidata.utils import update_dataset
+#from guidata.utils import update_dataset
 from guidata.py3compat import to_text_string
 
 from guiqwt.config import _
@@ -54,15 +55,26 @@ APP_DESC = _("""Record a spectrum using a michelson<br>
 interferometer with a delay stage""")
 VERSION = '0.0.1'
 
+nAir = 1.000292
+c0   = c/nAir
+# t = x/c
+fsDelay = c0*1e-15*1e3/2 # eine fs auf delay stage im mm
+fwhm = 2*np.sqrt(2*np.log(2))
+
+def dummyPulse(x):
+    A, mu, s, y0 = 1, 0, 40, 0
+    return A*np.exp(-0.5*((x-mu)/s)**2)*np.cos(2*np.pi*200*x)+y0
+
 class ObjectFT(QSplitter):
     """Object handling the item list, the selected item properties and plot"""
     def __init__(self, parent, plot):
         super(ObjectFT, self).__init__(Qt.Vertical, parent)
         self.plot = plot
-        self.curve = make.curve(np.arange(1000), np.zeros(1000), color='b')
+        self.curve = make.curve([], [], color='b')
         self.plot.add_item(self.curve)
 
         self.hCursor = None
+        self.vCursor = None
         self.xRange = None
 
         #print(dir(self.plot))
@@ -75,6 +87,14 @@ class ObjectFT(QSplitter):
     def setHCursor(self, i):
         self.hCursor.setYValue(i)
 
+    def addVCursor(self, i):
+        self.vCursor = make.vcursor(i)
+        self.plot.add_item(self.vCursor)
+    def setVCursor(self, i):
+        self.vCursor.setXValue(i)
+    def getVCursor(self):
+        return self.vCursor.xValue()
+
     def addBounds(self):
         self.xRange = make.range(0., 1.)
         self.plot.add_item(self.xRange)
@@ -82,22 +102,30 @@ class ObjectFT(QSplitter):
         #print(self.xRange.get_item_parameters())
              
     #@Slot(object, object)
-    def updateXAxes(self, xMin=0, xMax=1000):
+    def updateXAxe(self, xMin=0, xMax=1000):
         self.plot.set_axis_limits('bottom', xMin, xMax)
-        self.xRange.set_range(xMin, xMax)
+        if self.xRange is not None:
+            self.xRange.set_range(xMin, xMax)
         
     #@Slot(object, object)
-    def updateYAxes(self, yMin=0, yMax=1):
+    def updateYAxe(self, yMin=0, yMax=1):
         self.plot.set_axis_limits('left', yMin, yMax)
         #print('hcuror', self.hCursor.yValue(), 'yMax', yMax)
         #self.hCursor.setYValue(yMax*triggLevel)
         
     #@Slot(object)
     def updatePlot(self, data):
-        self.curve.setData(data[:,0], data[:,1])
+        '''New data arrived and thus update the plot'''
+        self.curve.set_data(data[:,0], data[:,1])
         #self.plot.plot.replot()
         
-
+    def computeSum(self):
+        '''Compute the integral of signal in given bounds'''
+        x, y = self.curve.get_data()
+        xMin, xMax = self.xRange.get_range()
+        xMinIdx = x.searchsorted(xMin)
+        xMaxIdx = x.searchsorted(xMax)
+        return y[xMinIdx:xMaxIdx+1].sum()
 
 class SignalFT(ObjectFT):
     #------ObjectFT API
@@ -109,8 +137,8 @@ class TiePieUi(QSplitter):
     Handling user interface to manage TiePie HS4/Diff Oscilloscope
     '''
     scpConnected = Signal()
-    xAxisChanged = Signal(object, object)
-    yAxisChanged = Signal(object, object)
+    xAxeChanged = Signal(object, object)
+    yAxeChanged = Signal(object, object)
     triggLevelChanged = Signal(object)
     def __init__(self, parent):
         #super(ObjectFT, self).__init__(Qt.Vertical, parent)
@@ -247,8 +275,8 @@ class TiePieUi(QSplitter):
             self.openDevBtn.setEnabled(False)
             
             # tell the world that the scope is connected
-            self.xAxisChanged.emit(0, 1/int(self.frequency.text())*1e-3*int(self.recordLen.text()))
-            self.yAxisChanged.emit(-1*self.scp.range, self.scp.range)
+            self.xAxeChanged.emit(0, 1/int(self.frequency.text())*1e-3*int(self.recordLen.text()))
+            self.yAxeChanged.emit(-1*self.scp.range, self.scp.range)
             self.triggLevelChanged.emit(ch.trigger.levels[0]*self.scp.range)
             self.scpConnected.emit()
             
@@ -275,7 +303,7 @@ class TiePieUi(QSplitter):
         with QMutexLocker(self.mutex):
             yMax = self.scp.channels[0].ranges[i]
             self.scp.range = yMax
-            self.yAxisChanged.emit(-1*yMax, yMax)
+            self.yAxeChanged.emit(-1*yMax, yMax)
             self.triggLevelChanged.emit(float(self.triggLevel.text())*yMax)
 
     def _triggLevelChanged(self):
@@ -288,12 +316,12 @@ class TiePieUi(QSplitter):
     def _changeFreq(self):
         with QMutexLocker(self.mutex):
             self.scp.sample_frequency = int(self.frequency.text())*1e3
-            self.xAxisChanged.emit(0, 1/self.scp.sample_frequency*self.scp.record_length)
+            self.xAxeChanged.emit(0, 1/self.scp.sample_frequency*self.scp.record_length)
 
     def _changeRecordLength(self):
         with QMutexLocker(self.mutex):
             self.scp.record_length = int(self.recordLen.text())
-            self.xAxisChanged.emit(0, 1/self.scp.sample_frequency*self.scp.record_length)
+            self.xAxeChanged.emit(0, 1/self.scp.sample_frequency*self.scp.record_length)
 
     def _setHystereses(self):
         with QMutexLocker(self.mutex):
@@ -315,11 +343,14 @@ class TiePieUi(QSplitter):
      
 class PiStageUi(QSplitter):
     stageConnected = Signal()
+    stopScan = Signal()
+    xAxeChanged = Signal(object, object)
     def __init__(self, parent):
         #super(ObjectFT, self).__init__(Qt.Vertical, parent)
         super().__init__(parent)
 
         self.stage = None
+        self.offset = 0. # offset from 0 where t0 is
 
         layoutWidget = QWidget()
         layout = QGridLayout()
@@ -328,7 +359,6 @@ class PiStageUi(QSplitter):
         # put layout together
         self.openStageBtn = QPushButton("Open stage")
         self.initStageBtn = QPushButton("Init stage")
-        
         
         #absolute move
         #current position
@@ -346,7 +376,29 @@ class PiStageUi(QSplitter):
         self.velocityLabel = QLabel('Velocity:')
         self.velocity = QSlider(Qt.Horizontal)
         self.velocity.setMinimum(0)
-        self.velocity.setMaximum(2000) # TODO: try to get max vel. from controller
+        self.velocity.setMaximum(2000) # unit in µm; TODO: try to get max vel. from controller
+
+        # scan from (fs)
+        self.scanFrom = QLineEdit()
+        self.scanFrom.setText('-100')
+        self.scanFrom.setValidator(QIntValidator())
+        # scan to (fs)
+        self.scanTo = QLineEdit()
+        self.scanTo.setText('100')
+        self.scanTo.setValidator(QIntValidator())
+        # scan stepsize (fs)
+        self.scanStep = QLineEdit()
+        self.scanStep.setText('10')
+        self.scanStep.setValidator(QIntValidator())
+        self.scanStep.validator().setBottom(0)
+        # center here button
+        self.centerBtn = QPushButton('Center here')
+        self.startScanBtn = QPushButton("Start scan")
+        self.stopScanBtn = QPushButton("Stop scan")
+        # spacer line
+        hLine = QFrame()
+        hLine.setFrameStyle(QFrame.HLine)
+        hLine.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Expanding)
 
         # put layout together
         layout.addWidget(self.openStageBtn, 0, 0)
@@ -363,7 +415,18 @@ class PiStageUi(QSplitter):
         layout.addWidget(self.deltaMove_fs, 8, 0, 1, 2)
         layout.addWidget(self.deltaMoveMinus_fs, 9, 0)
         layout.addWidget(self.deltaMovePlus_fs, 9, 1)
-        layout.setRowStretch(10, 10)
+        
+        layout.addWidget(hLine, 10, 0, 1, 2)
+        layout.addWidget(QLabel('Scan from (fs)'), 11, 0)
+        layout.addWidget(self.scanFrom, 11, 1)
+        layout.addWidget(QLabel('Scan to (fs)'), 12, 0)
+        layout.addWidget(self.scanTo, 12, 1)
+        layout.addWidget(QLabel('Stepsize (fs)'), 13, 0)
+        layout.addWidget(self.scanStep, 13, 1)
+        layout.addWidget(self.startScanBtn, 14, 0)
+        layout.addWidget(self.stopScanBtn, 14, 1)
+        layout.addWidget(self.centerBtn, 15, 1)
+        layout.setRowStretch(16, 10)
         layout.setColumnStretch(2,10)
 
         self.addWidget(layoutWidget)
@@ -371,13 +434,15 @@ class PiStageUi(QSplitter):
         # make button and stuff functional
         self.openStageBtn.released.connect(self.connectStage)
         self.initStageBtn.released.connect(self.initStage)
+        self.scanFrom.returnPressed.connect(self._xAxeChanged)
+        self.scanTo.returnPressed.connect(self._xAxeChanged)
+        #self.centerBtn.released.connect(self._centerHere)
+        
 
     def connectStage(self):
         gcs = GCSDevice()
         try:
             gcs.InterfaceSetupDlg()
-            #print(gcs.qIDN())
-            #print(gcs.qPOS())
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Information)
             msg.setText(gcs.qIDN())
@@ -390,6 +455,7 @@ class PiStageUi(QSplitter):
             msg.exec_()
 
     def initStage(self):
+        # TODO put this in thread and show egg clock
         if self.stage is not None:
             # TODO: give choice to select stage
             pitools.startup(self.stage, stages='M-112.1DG-NEW', refmode='FNL')
@@ -398,6 +464,7 @@ class PiStageUi(QSplitter):
                 'Velocity: {:f}mm/s'.format(self.stage.qVEL()['1']))
             self.velocity.setValue(int(1000*self.stage.qVEL()['1']))
             self.stageConnected.emit()
+            self._xAxeChanged()
         else:
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Critical)
@@ -407,45 +474,21 @@ class PiStageUi(QSplitter):
     def gotoPos(self):
         self.stage.MOV(self.stage.axes, 20)
         while not pitools.ontarget(self.stage, '1'):
-            print('moving')
-            time.sleep(1)
+            time.sleep(0.1)
+
+    def getDelayPoints(self):
+        von = int(self.scanFrom.text())
+        bis = int(self.scanTo.text())
+        stepSize = int(self.scanStep.text())
+        return np.linspace(von, bis, (np.abs(von)+bis)/stepSize)
+
+    def _xAxeChanged(self):
+        self.xAxeChanged.emit(int(self.scanFrom.text()), int(self.scanTo.text()))
+
+    def _centerPos(self, newOffset):
+        '''Slot which recieves the new center position'''
+        print(newOffset)
         
-class ScanningUi(QSplitter):
-    def __init__(self, parent):
-        #super(ObjectFT, self).__init__(Qt.Vertical, parent)
-        super().__init__(parent)
-
-        layoutWidget = QWidget()
-        layout = QGridLayout()
-        layoutWidget.setLayout(layout)
-
-        
-        # scan from (fs)
-        self.scanFrom = QLineEdit()
-        self.scanFrom.setValidator(QDoubleValidator())
-        # scan to (fs)
-        self.scanTo = QLineEdit()
-        self.scanTo.setValidator(QDoubleValidator())
-        # center here button
-        self.centerBtn = QPushButton('Center here')
-        self.goBtn = QPushButton("Scan")
-        self.stopBtn = QPushButton("Stop")
-        
-        # put layout together
-        layout.addWidget(QLabel('Scan from'), 0, 0)
-        layout.addWidget(self.scanFrom, 0, 1)
-        layout.addWidget(QLabel('Scan to'), 1, 0)
-        layout.addWidget(self.scanTo, 1, 1)
-        layout.addWidget(self.centerBtn, 2, 1)
-        layout.addWidget(self.goBtn, 4, 0)
-        layout.addWidget(self.stopBtn, 4, 1)
-        layout.setRowStretch(5,10)
-        #layout.setRowStretch(3,1)
-        layout.setColumnStretch(2,10)
-
-        self.addWidget(layoutWidget)
-
-        # make button and stuff functional
         
 
 class DockablePlotWidget(DockableWidget):
@@ -544,14 +587,15 @@ class SiftProxy(object):
         self.win = win
         #self.s = self.win.signalft.objects
 
-
 class MainWindow(QMainWindow):
     updateOsciPlot = Signal(object)
+    updateTdPlot = Signal(object)
     def __init__(self):
         QMainWindow.__init__(self)
 
         self.stage = None
         self.stopOsci = False
+        self.stopMeasure = False
         
         self.setWindowTitle(APP_NAME)
 
@@ -566,14 +610,15 @@ class MainWindow(QMainWindow):
         self.osciSignal.addHCursor(0)
         self.osciSignal.addBounds()
         
-        # Time Domain
+        # Time domain plot
         self.tdWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
         tdPlot = self.tdWidget.get_plot()
         #tdPlot.add_item(make.legend("TR"))
         self.tdSignal  = SignalFT(self, plot=tdPlot)
+        self.tdSignal.addVCursor(0)
 
-        # Frequency Domain
+        # Frequency domain plot
         self.fqdWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
         fqdplot = self.fqdWidget.get_plot()
@@ -586,13 +631,10 @@ class MainWindow(QMainWindow):
         self.tiepieUi = TiePieUi(self)
         self.piUi = PiStageUi(self)
         #self.stage = self.piUi.stage
-        self.scanningUi = ScanningUi(self)
         self.tabwidget.addTab(self.tiepieUi, QIcon('Handyscope_HS4.png'),
                               _("Osci"))
         self.tabwidget.addTab(self.piUi, get_icon('piController.png'),
                               _("Stage"))
-        self.tabwidget.addTab(self.scanningUi, get_icon('image.png'),
-                              _("Scanning"))
         self.add_dockwidget(self.tabwidget, _("Inst. sett."))
 #        self.setCentralWidget(self.tabwidget)
         self.osci_dock = self.add_dockwidget(self.osciCurveWidget,
@@ -604,16 +646,20 @@ class MainWindow(QMainWindow):
 
 
         # connect signals
-        #self.piUi.stageConnected.connect(self.s)
+        self.piUi.startScanBtn.released.connect(self.startMeasureThr)
+        self.piUi.stopScanBtn.released.connect(self.stopMeasureThr)
+        self.piUi.xAxeChanged.connect(self.tdSignal.updateXAxe)
+        self.piUi.centerBtn.released.connect(self._newCenter)
         self.tiepieUi.scpConnected.connect(self.startOsciThr)
-        self.tiepieUi.xAxisChanged.connect(self.osciSignal.updateXAxes)
-        self.tiepieUi.yAxisChanged.connect(self.osciSignal.updateYAxes)
+        self.tiepieUi.xAxeChanged.connect(self.osciSignal.updateXAxe)
+        self.tiepieUi.yAxeChanged.connect(self.osciSignal.updateYAxe)
         self.tiepieUi.triggLevelChanged.connect(self.osciSignal.setHCursor)
         self.osciThr = GenericThread(self.getOsciData)
+        self.measureThr = GenericThread(self.getMeasureData)
         self.updateOsciPlot.connect(self.osciSignal.updatePlot)
+        self.updateTdPlot.connect(self.tdSignal.updatePlot)
         
 
-        
         # File menu
         file_menu = self.menuBar().addMenu(_("File"))
         self.quit_action = create_action(self, _("Quit"), shortcut="Ctrl+Q",
@@ -687,6 +733,35 @@ class MainWindow(QMainWindow):
             self.updateOsciPlot.emit(data)
             time.sleep(0.5)
 
+    def startMeasureThr(self):
+        self.stopOsciThr()
+        self.measureThr.start()
+    def stopMeasureThr(self):
+        self.stopMeasure = True
+        while(self.measureThr.isRunning()):
+            time.sleep(0.03)
+        print('measuring stopped')
+        self.startOsciThr()
+    def getMeasureData(self):
+        delays = self.piUi.getDelayPoints()
+        data = []
+        for delay in delays:
+            if not self.stopMeasure:
+                #data = self.tiepieUi.getData()
+                #self.updateOsciPlot.emit(data)
+                #print('measuring at', delay)
+                y = dummyPulse(delay)
+                data.append((delay, y))
+                time.sleep(0.1)
+                self.updateTdPlot.emit(np.asarray(data))
+            else:
+                break
+
+    def _newCenter(self):
+        '''Function call when 'Center Here' triggered'''
+        newOffset = self.tdSignal.getVCursor()
+        self.piUi._centerPos(newOffset)
+            
 
 
 def run():
@@ -699,5 +774,3 @@ def run():
 
 if __name__ == '__main__':
     run()
-
-
