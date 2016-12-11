@@ -14,11 +14,11 @@ from guidata.qt.QtGui import (QMainWindow, QMessageBox, QSplitter, QComboBox,
                               QMessageBox, QSpinBox,
                               QVBoxLayout, QGridLayout, QWidget, 
                               QTabWidget, QLabel, QLineEdit,
-                              QDoubleValidator, QIntValidator,
+                              QDoubleValidator, QIntValidator, QValidator,
                               QMenu, QApplication, QCursor, QFont, QPushButton,
                               QSlider, QIcon)
 from guidata.qt.QtCore import (Qt, QT_VERSION_STR, PYQT_VERSION_STR, Signal,
-                               Slot, QThread, QMutex, QMutexLocker)
+                               Slot, QThread, QMutex, QMutexLocker, QLocale)
 from guidata.qt import PYQT5
 from guidata.qt.compat import getopenfilenames, getsavefilename
 
@@ -47,6 +47,8 @@ from guiqwt.builder import make
 from pipython import GCSDevice, pitools
 import libtiepie
 
+# set default language to c, so decimal point is '.' not ',' on german systems
+QLocale.setDefault(QLocale.c())
 APP_NAME = _("FTIR")
 APP_DESC = _("""Record a spectrum using a michelson<br>
 interferometer with a delay stage""")
@@ -58,18 +60,39 @@ class ObjectFT(QSplitter):
         super(ObjectFT, self).__init__(Qt.Vertical, parent)
         self.plot = plot
         self.curve = make.curve(np.arange(1000), np.zeros(1000), color='b')
-        
         self.plot.add_item(self.curve)
 
-    @Slot(object, object)
+        self.hCursor = None
+        self.xRange = None
+
+        #print(dir(self.plot))
+        #print(self.plot.itemList())
+        #print(dir(self.plot.items))
+
+    def addHCursor(self, i):
+        self.hCursor = make.hcursor(i)
+        self.plot.add_item(self.hCursor)
+    def setHCursor(self, i):
+        self.hCursor.setYValue(i)
+
+    def addBounds(self):
+        self.xRange = make.range(0., 1.)
+        self.plot.add_item(self.xRange)
+        #print(dir(self.xRange))
+        #print(self.xRange.get_item_parameters())
+             
+    #@Slot(object, object)
     def updateXAxes(self, xMin=0, xMax=1000):
         self.plot.set_axis_limits('bottom', xMin, xMax)
+        self.xRange.set_range(xMin, xMax)
         
-    @Slot(object, object)
-    def updateYAxes(self, yMin=0, yMax=1000):
+    #@Slot(object, object)
+    def updateYAxes(self, yMin=0, yMax=1):
         self.plot.set_axis_limits('left', yMin, yMax)
+        #print('hcuror', self.hCursor.yValue(), 'yMax', yMax)
+        #self.hCursor.setYValue(yMax*triggLevel)
         
-    @Slot(object)
+    #@Slot(object)
     def updatePlot(self, data):
         self.curve.setData(data[:,0], data[:,1])
         #self.plot.plot.replot()
@@ -88,6 +111,7 @@ class TiePieUi(QSplitter):
     scpConnected = Signal()
     xAxisChanged = Signal(object, object)
     yAxisChanged = Signal(object, object)
+    triggLevelChanged = Signal(object)
     def __init__(self, parent):
         #super(ObjectFT, self).__init__(Qt.Vertical, parent)
         super().__init__(parent)
@@ -111,10 +135,11 @@ class TiePieUi(QSplitter):
         self.delay = QLineEdit()
         self.delay.setValidator(QDoubleValidator())
         # trigger stuff
-        self.triggLevel =  QLineEdit()
-        self.triggLevel.setValidator(QDoubleValidator(0, 1, 3))
+        self.triggLevel = QLineEdit()
+        self.triggLevel.setText('0.') # init value otherwise there's trouble with signal changing index of sensitivity
+        self.triggLevel.setValidator(QDoubleValidator(0., 1., 3))
         self.hystereses = QLineEdit()
-        self.hystereses.setValidator(QDoubleValidator(0, 1, 3))
+        self.hystereses.setValidator(QDoubleValidator(0., 1., 3))
         self.triggKind = QComboBox()     
         # do averages
         self.averages = QSpinBox()
@@ -135,7 +160,7 @@ class TiePieUi(QSplitter):
         layout.addWidget(self.delay, 5, 1)
         layout.addWidget(QLabel('Trigger Ch'), 6, 0)
         layout.addWidget(self.triggCh, 6, 1)
-        layout.addWidget(QLabel('Trigger Level'), 7, 0)
+        layout.addWidget(QLabel('Trigger Level (%)'), 7, 0)
         layout.addWidget(self.triggLevel, 7, 1)
         layout.addWidget(QLabel('Hystereses'), 8, 0)
         layout.addWidget(self.hystereses, 8, 1)
@@ -153,7 +178,10 @@ class TiePieUi(QSplitter):
         self.chSens.currentIndexChanged.connect(self._changeSens)
         self.frequency.returnPressed.connect(self._changeFreq)
         self.recordLen.returnPressed.connect(self._changeRecordLength)
+        self.triggLevel.returnPressed.connect(self._triggLevelChanged)
+        self.triggLevel.textChanged.connect(self._check_state)        
         self.hystereses.returnPressed.connect(self._setHystereses)
+        self.hystereses.textChanged.connect(self._check_state)
 
     def openDev(self):
         # search for devices
@@ -218,9 +246,10 @@ class TiePieUi(QSplitter):
             
             self.openDevBtn.setEnabled(False)
             
-            # the world that the scope is connected
+            # tell the world that the scope is connected
             self.xAxisChanged.emit(0, 1/int(self.frequency.text())*1e-3*int(self.recordLen.text()))
             self.yAxisChanged.emit(-1*self.scp.range, self.scp.range)
+            self.triggLevelChanged.emit(ch.trigger.levels[0]*self.scp.range)
             self.scpConnected.emit()
             
         else:
@@ -244,23 +273,44 @@ class TiePieUi(QSplitter):
     #@Slot
     def _changeSens(self, i):
         with QMutexLocker(self.mutex):
-            self.scp.range = self.scp.channels[0].ranges[i]
-            self.yAxisChanged.emit(-1*self.scp.range, self.scp.range)
+            yMax = self.scp.channels[0].ranges[i]
+            self.scp.range = yMax
+            self.yAxisChanged.emit(-1*yMax, yMax)
+            self.triggLevelChanged.emit(float(self.triggLevel.text())*yMax)
+
+    def _triggLevelChanged(self):
+        with QMutexLocker(self.mutex):
+            idx = self.measCh.currentIndex()
+            ch = self.scp.channels[idx]
+            ch.trigger.levels[0] = float(self.triggLevel.text())
+            self.triggLevelChanged.emit(float(self.triggLevel.text())*self.scp.range)
             
     def _changeFreq(self):
         with QMutexLocker(self.mutex):
             self.scp.sample_frequency = int(self.frequency.text())*1e3
-            self.axisChanged.emit(0, 1/self.scp.sample_frequency*self.scp.record_length)
+            self.xAxisChanged.emit(0, 1/self.scp.sample_frequency*self.scp.record_length)
 
     def _changeRecordLength(self):
         with QMutexLocker(self.mutex):
             self.scp.record_length = int(self.recordLen.text())
-            self.axisChanged.emit(0, 1/self.scp.sample_frequency*self.scp.record_length)
+            self.xAxisChanged.emit(0, 1/self.scp.sample_frequency*self.scp.record_length)
 
     def _setHystereses(self):
         with QMutexLocker(self.mutex):
             self.scp.hystereses = float(self.hystereses.text())
         
+    def _check_state(self, *args, **kwargs):
+        '''https://snorfalorpagus.net/blog/2014/08/09/validating-user-input-in-pyqt4-using-qvalidator/'''
+        sender = self.sender()
+        validator = sender.validator()
+        state = validator.validate(sender.text(), 0)[0]
+        if state == QValidator.Acceptable:
+            color = '#FFFFFF' # green
+        elif state == QValidator.Intermediate:
+            color = '#fff79a' # yellow
+        else:
+            color = '#f6989d' # red
+        sender.setStyleSheet('QLineEdit { background-color: %s }' % color)
 
      
 class PiStageUi(QSplitter):
@@ -510,8 +560,11 @@ class MainWindow(QMainWindow):
         self.osciCurveWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
         osciPlot = self.osciCurveWidget.get_plot()
+        #osciPlot.set_axis_title('bottom', 'Time (s)')
         #osciplot.add_item(make.legend("TR"))
-        self.osciSignal = SignalFT(self, plot=osciPlot)        
+        self.osciSignal = SignalFT(self, plot=osciPlot)
+        self.osciSignal.addHCursor(0)
+        self.osciSignal.addBounds()
         
         # Time Domain
         self.tdWidget = DockablePlotWidget(self, CurveWidget,
@@ -555,6 +608,7 @@ class MainWindow(QMainWindow):
         self.tiepieUi.scpConnected.connect(self.startOsciThr)
         self.tiepieUi.xAxisChanged.connect(self.osciSignal.updateXAxes)
         self.tiepieUi.yAxisChanged.connect(self.osciSignal.updateYAxes)
+        self.tiepieUi.triggLevelChanged.connect(self.osciSignal.setHCursor)
         self.osciThr = GenericThread(self.getOsciData)
         self.updateOsciPlot.connect(self.osciSignal.updatePlot)
         
@@ -566,7 +620,7 @@ class MainWindow(QMainWindow):
                                     icon=get_std_icon("DialogCloseButton"),
                                     tip=_("Quit application"),
                                     triggered=self.close)
-        triggerTest_action = create_action(self, _("test..."),
+        triggerTest_action = create_action(self, _("Stop Osci"),
                                     shortcut="Ctrl+O",
                                     icon=get_icon('fileopen.png'),
                                     tip=_("Open an image"),
@@ -627,13 +681,13 @@ class MainWindow(QMainWindow):
         self.stopOsci = True
         while(self.osciThr.isRunning()):
             time.sleep(0.03)
-
     def getOsciData(self):
         while not self.stopOsci:
             data = self.tiepieUi.getData()
             self.updateOsciPlot.emit(data)
             time.sleep(0.5)
-        
+
+
 
 def run():
     from guidata import qapplication
