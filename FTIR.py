@@ -63,7 +63,7 @@ fwhm = 2*np.sqrt(2*np.log(2))
 
 def dummyPulse(x):
     A, mu, s, y0 = 1, 0, 40, 0
-    return A*np.exp(-0.5*((x-mu)/s)**2)*np.cos(2*np.pi*200*x)+y0
+    return A*np.exp(-0.5*((x-mu)/s)**2)*np.cos(2*np.pi*20*x)+y0
 
 class ObjectFT(QSplitter):
     """Object handling the item list, the selected item properties and plot"""
@@ -126,6 +126,27 @@ class ObjectFT(QSplitter):
         xMinIdx = x.searchsorted(xMin)
         xMaxIdx = x.searchsorted(xMax)
         return y[xMinIdx:xMaxIdx+1].sum()
+
+    def computeFFT(self, data=None):
+        '''assumes x to be fs, thus the fft should be THz'''
+        if data is None:
+            x, y = self.curve.get_data()
+        else:
+            x, y = data[:,0], data[:,1]
+        Fs = 1/(x[1] - x[0]) # sampling rate
+        #Ts = 1/Fs # sampling interval
+              
+        n = len(y) # length of the signal
+        k = np.arange(n)
+        T = n/Fs
+        frq = k/T # two sides frequency range
+        frq = frq[range(int(n/2))] # one side frequency range
+              
+        Y = np.fft.fft(y)/n # fft computing and normalization
+        Y = Y[range(int(n/2))]
+              
+        data = np.column_stack((frq, abs(Y)))
+        return data
 
 class SignalFT(ObjectFT):
     #------ObjectFT API
@@ -389,7 +410,7 @@ class PiStageUi(QSplitter):
         # scan stepsize (fs)
         self.scanStep = QLineEdit()
         self.scanStep.setText('10')
-        self.scanStep.setValidator(QIntValidator())
+        self.scanStep.setValidator(QDoubleValidator())
         self.scanStep.validator().setBottom(0)
         # center here button
         self.centerBtn = QPushButton('Center here')
@@ -479,7 +500,8 @@ class PiStageUi(QSplitter):
     def getDelayPoints(self):
         von = int(self.scanFrom.text())
         bis = int(self.scanTo.text())
-        stepSize = int(self.scanStep.text())
+        #stepSize = int(self.scanStep.text())
+        stepSize = float(self.scanStep.text())
         return np.linspace(von, bis, (np.abs(von)+bis)/stepSize)
 
     def _xAxeChanged(self):
@@ -590,6 +612,7 @@ class SiftProxy(object):
 class MainWindow(QMainWindow):
     updateOsciPlot = Signal(object)
     updateTdPlot = Signal(object)
+    updateFqPlot = Signal(object)
     def __init__(self):
         QMainWindow.__init__(self)
 
@@ -658,6 +681,8 @@ class MainWindow(QMainWindow):
         self.measureThr = GenericThread(self.getMeasureData)
         self.updateOsciPlot.connect(self.osciSignal.updatePlot)
         self.updateTdPlot.connect(self.tdSignal.updatePlot)
+        self.updateFqPlot.connect(lambda data:
+            self.fqSignal.updatePlot(self.fqSignal.computeFFT(data)))
         
 
         # File menu
@@ -683,7 +708,7 @@ class MainWindow(QMainWindow):
             ns = {'ftir': self.sift_proxy,
                   'np': np, 'sps': sps, 'spi': spi,
                   'os': os, 'sys': sys, 'osp': osp, 'time': time}
-            msg = "Example: sift.s[0] returns signal object #0\n"\
+            msg = "Example: ftir.s[0] returns signal object #0\n"\
                   "Modules imported at startup: "\
                   "os, sys, os.path as osp, time, "\
                   "numpy as np, scipy.signal as sps, scipy.ndimage as spi"
@@ -735,25 +760,26 @@ class MainWindow(QMainWindow):
 
     def startMeasureThr(self):
         self.stopOsciThr()
+        self.stopMeasure = False
         self.measureThr.start()
     def stopMeasureThr(self):
         self.stopMeasure = True
         while(self.measureThr.isRunning()):
             time.sleep(0.03)
-        print('measuring stopped')
         self.startOsciThr()
     def getMeasureData(self):
         delays = self.piUi.getDelayPoints()
-        data = []
-        for delay in delays:
+        data = np.column_stack((delays, np.zeros(len(delays))))
+        for i, delay in enumerate(delays):
             if not self.stopMeasure:
                 #data = self.tiepieUi.getData()
                 #self.updateOsciPlot.emit(data)
                 #print('measuring at', delay)
                 y = dummyPulse(delay)
-                data.append((delay, y))
+                data[i,1] = y
                 time.sleep(0.1)
-                self.updateTdPlot.emit(np.asarray(data))
+                self.updateTdPlot.emit(data)
+                self.updateFqPlot.emit(data)
             else:
                 break
 
