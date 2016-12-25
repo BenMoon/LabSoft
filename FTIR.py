@@ -380,6 +380,7 @@ class PiStageUi(QSplitter):
 
         self.stage = None
         self.offset = 0. # offset from 0 where t0 is (mm)
+        self.newOff = 0.
         self.stageRange = (0, 0)
 
         layoutWidget = QWidget()
@@ -424,6 +425,7 @@ class PiStageUi(QSplitter):
         self.scanStep.setValidator(QDoubleValidator())
         # center here button
         self.centerBtn = QPushButton('Center here')
+        self.centerBtn.setToolTip('Center scan at current stage position')
         self.startScanBtn = QPushButton("Start scan")
         self.stopScanBtn = QPushButton("Stop scan")
         # spacer line
@@ -467,7 +469,7 @@ class PiStageUi(QSplitter):
         self.initStageBtn.released.connect(self.initStage)
         self.scanFrom.returnPressed.connect(self._xAxeChanged)
         self.scanTo.returnPressed.connect(self._xAxeChanged)
-        #self.centerBtn.released.connect(self._centerHere)
+        self.centerBtn.released.connect(self._centerHere)
         self.deltaMovePlus_mm.released.connect(
             lambda x=1: self.moveRel_mm(float(self.deltaMove_mm.text())))
         self.deltaMoveMinus_mm.released.connect(
@@ -486,6 +488,7 @@ class PiStageUi(QSplitter):
             msg.setText(gcs.qIDN())
             msg.exec_()
             self.stage = gcs
+            self.openStageBtn.setEnabled(False)
         except:
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Critical)
@@ -503,12 +506,13 @@ class PiStageUi(QSplitter):
             self.velocity.setValue(int(1000*self.stage.qVEL()['1']))
             self.stageConnected.emit()
             self._xAxeChanged()
-            self.currentPos.setText('{:.6f}'.format(
+            self.currentPos.setText('{:.7f}'.format(
                 self.stage.qPOS()['1']))
             self.__startCurrPosThr()
             self.stageRange = (self.stage.qTMN()['1'],
                                self.stage.qTMX()['1'])
             self.scanStep.validator().setBottom(0)
+            self.initStageBtn.setEnabled(False)
         else:
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Critical)
@@ -566,16 +570,20 @@ class PiStageUi(QSplitter):
     def _xAxeChanged(self):
         self.xAxeChanged.emit(int(self.scanFrom.text()), int(self.scanTo.text()))
 
-    def setCenter(self, newOffset):
+    def setCenter(self):
         '''Slot which recieves the new center position
            in fs and sets offset in mm
         '''
-        if self.offset == 0:
-            self.offset += self._calcAbsPos(newOffset)
-        else:
-            self.offset += self.offset - self._calcAbsPos(newOffset) 
-        print('offset', self.offset, newOffset)
-        
+        if self.newOff != 0:
+            self.offset += (self.newOff*fsDelay)
+            print('offset', self.offset, self.newOff)
+            self.newOff = 0.
+
+    def newOffset(self, newOffset):
+        self.newOff = newOffset
+
+    def _centerHere(self):
+        self.offset = self.stage.qPOS()['1']
 
     def __startCurrPosThr(self):
         self.stopCurrPosThr = False
@@ -593,7 +601,7 @@ class PiStageUi(QSplitter):
                 self.updateCurrPos.emit(newPos)
             time.sleep(0.5)
     def __updateCurrPos(self, newPos):
-        self.currentPos.setText('{:.6f}'.format(newPos))
+        self.currentPos.setText('{:.7f}'.format(newPos))
         
 
 class DockablePlotWidget(DockableWidget):
@@ -604,6 +612,7 @@ class DockablePlotWidget(DockableWidget):
         layout = QVBoxLayout()
         self.plotwidget = plotwidgetclass()
         layout.addWidget(self.plotwidget)
+        #layout.addWidget(QPushButton('hallo'))
         self.setLayout(layout)
         self.setup()
         
@@ -759,10 +768,10 @@ class MainWindow(QMainWindow):
         self.tiepieUi.xAxeChanged.connect(self.osciSignal.updateXAxe)
         self.tiepieUi.yAxeChanged.connect(self.osciSignal.updateYAxe)
         self.tiepieUi.triggLevelChanged.connect(self.osciSignal.setHCursor)
-        self.piUi.centerBtn.released.connect(
-            lambda x=None: self.piUi.setCenter(self.tdSignal.getVCursor()))
-        #self.tdSignal.plot.SIG_MARKER_CHANGED.connect(
+        #self.piUi.centerBtn.released.connect(
         #    lambda x=None: self.piUi.setCenter(self.tdSignal.getVCursor()))
+        self.tdSignal.plot.SIG_MARKER_CHANGED.connect(
+            lambda x=None: self.piUi.newOffset(self.tdSignal.getVCursor()))
         # create threads
         self.osciThr = GenericThread(self.getOsciData)
         self.measureThr = GenericThread(self.getMeasureData)
@@ -846,6 +855,11 @@ class MainWindow(QMainWindow):
             time.sleep(0.5)
 
     def startMeasureThr(self):
+        # rescale tdPlot (updateXAxe)
+        self.piUi._xAxeChanged()
+        # set vCursor to 0
+        self.tdSignal.setVCursor(0)
+        self.piUi.setCenter()
         self.stopOsciThr()
         self.stopMeasure = False
         self.measureThr.start()
@@ -871,6 +885,7 @@ class MainWindow(QMainWindow):
                 self.updateFqPlot.emit(data)
             else:
                 break
+        self.startOsciThr()
     """
     def _newCenter(self):
         '''Function call when 'Center Here' triggered'''
