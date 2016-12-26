@@ -76,7 +76,9 @@ class ObjectFT(QSplitter):
 
         self.hCursor = None
         self.vCursor = None
-        self.xRange = None
+        self.xRange = None # holds limits of bounds
+        self.xMinMax = () # holds limits of data min and max
+        self.scaleFun = lambda x: x
 
         #print(dir(self.plot))
         #print(self.plot.itemList())
@@ -105,6 +107,7 @@ class ObjectFT(QSplitter):
     #@Slot(object, object)
     def updateXAxe(self, xMin=0, xMax=1000):
         self.plot.set_axis_limits('bottom', xMin, xMax)
+        #self.xMinMax = (xMin, xMax)
         if self.xRange is not None:
             self.xRange.set_range(xMin, xMax)
         
@@ -118,8 +121,21 @@ class ObjectFT(QSplitter):
     def updatePlot(self, data):
         '''New data arrived and thus update the plot'''
         self.curve.set_data(data[:,0], data[:,1])
+        #self.curve.set_data(self.scaleFun(data[:,0]), data[:,1])
         #self.plot.plot.replot()
+
+    def funChanged(self, fun):
+        '''Slot for changing the x axis scanle function'''
+        xMin, xMax = self.xMinMax
+        print('funChange', xMin, xMax)
+        xMin /= self.scaleFun(1) # get back to original value
+        xMax /= self.scaleFun(1)
+        self.scaleFun = fun
         
+        print(self.scaleFun(xMin))
+        self.updateXAxe(fun(xMin), fun(xMax))
+        #print(fun(self.xRange[0]), fun(self.xRange[1]))
+
     def computeSum(self):
         '''Compute the integral of signal in given bounds'''
         x, y = self.curve.get_data()
@@ -603,17 +619,34 @@ class PiStageUi(QSplitter):
     def __updateCurrPos(self, newPos):
         self.currentPos.setText('{:.7f}'.format(newPos))
         
+class XAxeCalc(QComboBox):
+    idxChanged = Signal(object)
+    def __init__(self, parent):
+        super(QComboBox, self).__init__(parent)
+        self.functions = []
+        self.setEditable(True)
+        self.lineEdit().setReadOnly(True)
+        self.lineEdit().setAlignment(Qt.AlignCenter)
+        self.currentIndexChanged.connect(self.changed)
 
+    def addFun(self, name, fun):
+        self.functions.append(fun)
+        self.addItem(name)
+
+    def changed(self, idx):
+        self.idxChanged.emit(self.functions[idx])
+    
 class DockablePlotWidget(DockableWidget):
     LOCATION = Qt.RightDockWidgetArea
     def __init__(self, parent, plotwidgetclass, toolbar):
         super(DockablePlotWidget, self).__init__(parent)
         self.toolbar = toolbar
-        layout = QVBoxLayout()
+        self.layout = QVBoxLayout()
         self.plotwidget = plotwidgetclass()
-        layout.addWidget(self.plotwidget)
-        #layout.addWidget(QPushButton('hallo'))
-        self.setLayout(layout)
+        self.layout.addWidget(self.plotwidget)
+        #self.calcFun = XAxeCalc(self)
+        #self.layout.addWidget(self.calcFun)
+        self.setLayout(self.layout)
         self.setup()
         
     def get_plot(self):
@@ -693,7 +726,7 @@ class GenericThread(QThread):
         self.wait()
 
     def run(self):
-        self.function(*self.args,**self.kwargs)
+        self.function(*self.args, **self.kwargs)
         return
 
 class SiftProxy(object):
@@ -718,6 +751,9 @@ class MainWindow(QMainWindow):
         curveplot_toolbar = self.addToolBar(_("Curve Plotting Toolbar"))
         self.osciCurveWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
+        #self.osciCurveWidget.calcFun.addFun('s', lambda x: x)
+        #self.osciCurveWidget.calcFun.addFun('ms', lambda x: x*1e3)
+        #self.osciCurveWidget.calcFun.addFun('µs', lambda x: x*1e6)
         osciPlot = self.osciCurveWidget.get_plot()
         #osciPlot.set_axis_title('bottom', 'Time (s)')
         #osciplot.add_item(make.legend("TR"))
@@ -728,17 +764,24 @@ class MainWindow(QMainWindow):
         # Time domain plot
         self.tdWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
+        #self.tdWidget.calcFun.addFun('fs', lambda x: x)
+        #self.tdWidget.calcFun.addFun('µm', lambda x: x*fsDelay*1e3)
+        #self.tdWidget.calcFun.addFun('mm', lambda x: x*fsDelay)
         tdPlot = self.tdWidget.get_plot()
         #tdPlot.add_item(make.legend("TR"))
         self.tdSignal  = SignalFT(self, plot=tdPlot)
         self.tdSignal.addVCursor(0)
 
         # Frequency domain plot
-        self.fqdWidget = DockablePlotWidget(self, CurveWidget,
+        self.fdWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
-        fqdplot = self.fqdWidget.get_plot()
+        #self.fdWidget.calcFun.addFun('PHz', lambda x: x)
+        #self.fdWidget.calcFun.addFun('THz', lambda x: x*1e3)
+        #self.fdWidget.calcFun.addFun('µm', lambda x: c0/x)
+        #self.fdWidget.calcFun.addFun('eV', lambda x: x)
+        fdplot = self.fdWidget.get_plot()
         #fqdplot.add_item(make.legend("TR"))
-        self.fqSignal  = SignalFT(self, plot=fqdplot)
+        self.fdSignal  = SignalFT(self, plot=fdplot)
 
         # Main window widgets
         self.tabwidget = DockableTabWidget(self)
@@ -756,7 +799,7 @@ class MainWindow(QMainWindow):
                                               title=_("Osciloscope"))
         self.td_dock = self.add_dockwidget(self.tdWidget,
                                               title=_("Time Domain"))
-        self.fqd_dock = self.add_dockwidget(self.fqdWidget,
+        self.fd_dock = self.add_dockwidget(self.fdWidget,
                                               title=_("Frequency Domain"))
 
 
@@ -772,6 +815,10 @@ class MainWindow(QMainWindow):
         #    lambda x=None: self.piUi.setCenter(self.tdSignal.getVCursor()))
         self.tdSignal.plot.SIG_MARKER_CHANGED.connect(
             lambda x=None: self.piUi.newOffset(self.tdSignal.getVCursor()))
+        #self.osciCurveWidget.calcFun.idxChanged.connect(self.osciSignal.funChanged)
+        #self.tdWidget.calcFun.idxChanged.connect(self.tdSignal.funChanged)
+        #self.fdWidget.calcFun.idxChanged.connect(self.fdSignal.funChanged)
+
         # create threads
         self.osciThr = GenericThread(self.getOsciData)
         self.measureThr = GenericThread(self.getMeasureData)
