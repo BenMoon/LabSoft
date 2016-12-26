@@ -107,7 +107,7 @@ class ObjectFT(QSplitter):
     #@Slot(object, object)
     def updateXAxe(self, xMin=0, xMax=1000):
         self.plot.set_axis_limits('bottom', xMin, xMax)
-        #self.xMinMax = (xMin, xMax)
+        self.xMinMax = (xMin, xMax)
         if self.xRange is not None:
             self.xRange.set_range(xMin, xMax)
         
@@ -120,19 +120,19 @@ class ObjectFT(QSplitter):
     #@Slot(object)
     def updatePlot(self, data):
         '''New data arrived and thus update the plot'''
-        self.curve.set_data(data[:,0], data[:,1])
-        #self.curve.set_data(self.scaleFun(data[:,0]), data[:,1])
+        #self.curve.set_data(data[:,0], data[:,1])
+        self.curve.set_data(self.scaleFun(data[:,0]), data[:,1])
         #self.plot.plot.replot()
 
     def funChanged(self, fun):
         '''Slot for changing the x axis scanle function'''
         xMin, xMax = self.xMinMax
-        print('funChange', xMin, xMax)
+        #print('funChange', xMin, xMax)
         xMin /= self.scaleFun(1) # get back to original value
         xMax /= self.scaleFun(1)
         self.scaleFun = fun
         
-        print(self.scaleFun(xMin))
+        #print(self.scaleFun(xMin))
         self.updateXAxe(fun(xMin), fun(xMax))
         #print(fun(self.xRange[0]), fun(self.xRange[1]))
 
@@ -644,8 +644,8 @@ class DockablePlotWidget(DockableWidget):
         self.layout = QVBoxLayout()
         self.plotwidget = plotwidgetclass()
         self.layout.addWidget(self.plotwidget)
-        #self.calcFun = XAxeCalc(self)
-        #self.layout.addWidget(self.calcFun)
+        self.calcFun = XAxeCalc(self)
+        self.layout.addWidget(self.calcFun)
         self.setLayout(self.layout)
         self.setup()
         
@@ -737,7 +737,7 @@ class SiftProxy(object):
 class MainWindow(QMainWindow):
     updateOsciPlot = Signal(object)
     updateTdPlot = Signal(object)
-    updateFqPlot = Signal(object)
+    updateFdPlot = Signal(object)
     def __init__(self):
         QMainWindow.__init__(self)
 
@@ -751,9 +751,9 @@ class MainWindow(QMainWindow):
         curveplot_toolbar = self.addToolBar(_("Curve Plotting Toolbar"))
         self.osciCurveWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
-        #self.osciCurveWidget.calcFun.addFun('s', lambda x: x)
-        #self.osciCurveWidget.calcFun.addFun('ms', lambda x: x*1e3)
-        #self.osciCurveWidget.calcFun.addFun('µs', lambda x: x*1e6)
+        self.osciCurveWidget.calcFun.addFun('s', lambda x: x)
+        self.osciCurveWidget.calcFun.addFun('ms', lambda x: x*1e3)
+        self.osciCurveWidget.calcFun.addFun('µs', lambda x: x*1e6)
         osciPlot = self.osciCurveWidget.get_plot()
         #osciPlot.set_axis_title('bottom', 'Time (s)')
         #osciplot.add_item(make.legend("TR"))
@@ -764,9 +764,9 @@ class MainWindow(QMainWindow):
         # Time domain plot
         self.tdWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
-        #self.tdWidget.calcFun.addFun('fs', lambda x: x)
-        #self.tdWidget.calcFun.addFun('µm', lambda x: x*fsDelay*1e3)
-        #self.tdWidget.calcFun.addFun('mm', lambda x: x*fsDelay)
+        self.tdWidget.calcFun.addFun('fs', lambda x: x)
+        self.tdWidget.calcFun.addFun('µm', lambda x: x*fsDelay*1e3)
+        self.tdWidget.calcFun.addFun('mm', lambda x: x*fsDelay)
         tdPlot = self.tdWidget.get_plot()
         #tdPlot.add_item(make.legend("TR"))
         self.tdSignal  = SignalFT(self, plot=tdPlot)
@@ -775,10 +775,10 @@ class MainWindow(QMainWindow):
         # Frequency domain plot
         self.fdWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
-        #self.fdWidget.calcFun.addFun('PHz', lambda x: x)
-        #self.fdWidget.calcFun.addFun('THz', lambda x: x*1e3)
-        #self.fdWidget.calcFun.addFun('µm', lambda x: c0/x)
-        #self.fdWidget.calcFun.addFun('eV', lambda x: x)
+        self.fdWidget.calcFun.addFun('PHz', lambda x: x)
+        self.fdWidget.calcFun.addFun('THz', lambda x: x*1e3)
+        self.fdWidget.calcFun.addFun('µm', lambda x: c0/x)
+        self.fdWidget.calcFun.addFun('eV', lambda x: x)
         fdplot = self.fdWidget.get_plot()
         #fqdplot.add_item(make.legend("TR"))
         self.fdSignal  = SignalFT(self, plot=fdplot)
@@ -815,17 +815,20 @@ class MainWindow(QMainWindow):
         #    lambda x=None: self.piUi.setCenter(self.tdSignal.getVCursor()))
         self.tdSignal.plot.SIG_MARKER_CHANGED.connect(
             lambda x=None: self.piUi.newOffset(self.tdSignal.getVCursor()))
-        #self.osciCurveWidget.calcFun.idxChanged.connect(self.osciSignal.funChanged)
-        #self.tdWidget.calcFun.idxChanged.connect(self.tdSignal.funChanged)
-        #self.fdWidget.calcFun.idxChanged.connect(self.fdSignal.funChanged)
 
+        self.osciCurveWidget.calcFun.idxChanged.connect(self.osciSignal.funChanged)
+        self.tdWidget.calcFun.idxChanged.connect(self.tdSignal.funChanged)
+        self.fdWidget.calcFun.idxChanged.connect(self.fdSignal.funChanged)
+
+        self.updateOsciPlot.connect(self.osciSignal.updatePlot)
+        self.updateTdPlot.connect(self.tdSignal.updatePlot)
+        self.updateFdPlot.connect(lambda data:
+            self.fdSignal.updatePlot(self.fdSignal.computeFFT(data)))
+        
         # create threads
         self.osciThr = GenericThread(self.getOsciData)
         self.measureThr = GenericThread(self.getMeasureData)
-        self.updateOsciPlot.connect(self.osciSignal.updatePlot)
-        self.updateTdPlot.connect(self.tdSignal.updatePlot)
-        self.updateFqPlot.connect(lambda data:
-            self.fqSignal.updatePlot(self.fqSignal.computeFFT(data)))
+        
         
 
         # File menu
@@ -929,7 +932,7 @@ class MainWindow(QMainWindow):
                 data[i,1] = tmp[:,1].mean()
                 #time.sleep(0.05)
                 self.updateTdPlot.emit(data)
-                self.updateFqPlot.emit(data)
+                self.updateFdPlot.emit(data)
             else:
                 break
         self.startOsciThr()
