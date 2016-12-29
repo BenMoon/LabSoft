@@ -77,8 +77,9 @@ class ObjectFT(QSplitter):
         self.hCursor = None
         self.vCursor = None
         self.xRange = None # holds limits of bounds
-        self.xMinMax = () # holds limits of data min and max
+        self.xMinMax = None # holds limits of data min and max, necessary to initialize once before axis change is possible
         self.scaleFun = lambda x: x
+        self.scaleFunInv = lambda x: x
 
         #print(dir(self.plot))
         #print(self.plot.itemList())
@@ -106,10 +107,11 @@ class ObjectFT(QSplitter):
              
     #@Slot(object, object)
     def updateXAxe(self, xMin=0, xMax=1000):
-        self.plot.set_axis_limits('bottom', xMin, xMax)
-        self.xMinMax = (xMin, xMax)
+        self.plot.set_axis_limits('bottom', self.scaleFun(xMin), self.scaleFun(xMax))
+        self.xMinMax = (self.scaleFun(xMin), self.scaleFun(xMax))
+        #print('updateXAxe', self.xMinMax, xMin, xMax)
         if self.xRange is not None:
-            self.xRange.set_range(xMin, xMax)
+            self.xRange.set_range(self.scaleFun(xMin), self.scaleFun(xMax))
         
     #@Slot(object, object)
     def updateYAxe(self, yMin=0, yMax=1):
@@ -124,17 +126,31 @@ class ObjectFT(QSplitter):
         self.curve.set_data(self.scaleFun(data[:,0]), data[:,1])
         #self.plot.plot.replot()
 
-    def funChanged(self, fun):
+    def funChanged(self, functions):
         '''Slot for changing the x axis scanle function'''
-        xMin, xMax = self.xMinMax
+        #print('Hallo', self.xMinMax)
+        fun, funInv = functions
+        if self.xMinMax is not None:
+            xMin, xMax = self.xMinMax
+        else:
+            print('Error: please get data first before changing axis')
+            return
+        #print('funchanged', self.xMinMax)
         #print('funChange', xMin, xMax)
-        xMin /= self.scaleFun(1) # get back to original value
-        xMax /= self.scaleFun(1)
+        if xMin != 0:
+            xMin = self.scaleFunInv(xMin) # get back to original value
+        if xMax != 0:
+            xMax = self.scaleFunInv(xMax)
+        x, y  = self.curve.get_data()
+        x    = self.scaleFunInv(x)
         self.scaleFun = fun
+        self.scaleFunInv = funInv
         
-        #print(self.scaleFun(xMin))
-        self.updateXAxe(fun(xMin), fun(xMax))
-        #print(fun(self.xRange[0]), fun(self.xRange[1]))
+        print('xMinMax', xMin, xMax)
+        self.updateXAxe(xMin, xMax)
+        # replot data on new axis
+        self.updatePlot(np.column_stack((x, y)))
+        #print(fun(self.xRange[0]), fun(self.xRange[1]))       
 
     def computeSum(self):
         '''Compute the integral of signal in given bounds'''
@@ -157,7 +173,7 @@ class ObjectFT(QSplitter):
         k = np.arange(n)
         T = n/Fs
         frq = k/T # two sides frequency range
-        frq = frq[range(int(n/2))] # one side frequency range
+        frq = frq[np.arange(1, int(n/2)+1)] # one side frequency range
               
         Y = np.fft.fft(y)/n # fft computing and normalization
         Y = Y[range(int(n/2))]
@@ -629,8 +645,8 @@ class XAxeCalc(QComboBox):
         self.lineEdit().setAlignment(Qt.AlignCenter)
         self.currentIndexChanged.connect(self.changed)
 
-    def addFun(self, name, fun):
-        self.functions.append(fun)
+    def addFun(self, name, fun, funInv):
+        self.functions.append((fun, funInv))
         self.addItem(name)
 
     def changed(self, idx):
@@ -751,9 +767,12 @@ class MainWindow(QMainWindow):
         curveplot_toolbar = self.addToolBar(_("Curve Plotting Toolbar"))
         self.osciCurveWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
-        self.osciCurveWidget.calcFun.addFun('s', lambda x: x)
-        self.osciCurveWidget.calcFun.addFun('ms', lambda x: x*1e3)
-        self.osciCurveWidget.calcFun.addFun('µs', lambda x: x*1e6)
+        self.osciCurveWidget.calcFun.addFun('s', lambda x: x,
+                                                 lambda x: x)
+        self.osciCurveWidget.calcFun.addFun('ms', lambda x: x*1e3,
+                                                  lambda x: x*1e-3)
+        self.osciCurveWidget.calcFun.addFun('µs', lambda x: x*1e6,
+                                                  lambda x: x*1e-6)
         osciPlot = self.osciCurveWidget.get_plot()
         #osciPlot.set_axis_title('bottom', 'Time (s)')
         #osciplot.add_item(make.legend("TR"))
@@ -764,9 +783,12 @@ class MainWindow(QMainWindow):
         # Time domain plot
         self.tdWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
-        self.tdWidget.calcFun.addFun('fs', lambda x: x)
-        self.tdWidget.calcFun.addFun('µm', lambda x: x*fsDelay*1e3)
-        self.tdWidget.calcFun.addFun('mm', lambda x: x*fsDelay)
+        self.tdWidget.calcFun.addFun('fs', lambda x: x,
+                                           lambda x: x)
+        self.tdWidget.calcFun.addFun('µm', lambda x: x*fsDelay*1e3,
+                                           lambda x: x/fsDelay*1e-3)
+        self.tdWidget.calcFun.addFun('mm', lambda x: x*fsDelay,
+                                           lambda x: x/fsDelay)
         tdPlot = self.tdWidget.get_plot()
         #tdPlot.add_item(make.legend("TR"))
         self.tdSignal  = SignalFT(self, plot=tdPlot)
@@ -775,10 +797,15 @@ class MainWindow(QMainWindow):
         # Frequency domain plot
         self.fdWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
-        self.fdWidget.calcFun.addFun('PHz', lambda x: x)
-        self.fdWidget.calcFun.addFun('THz', lambda x: x*1e3)
-        self.fdWidget.calcFun.addFun('µm', lambda x: c0/x)
-        self.fdWidget.calcFun.addFun('eV', lambda x: x)
+        self.fdWidget.calcFun.addFun('PHz', lambda x: x,
+                                            lambda x: x)
+        self.fdWidget.calcFun.addFun('THz', lambda x: x*1e3,
+                                            lambda x: x*1e-3)
+        # x = PHz -> 1e15, µm = 1e-6
+        self.fdWidget.calcFun.addFun('µm', lambda x: c0/x*1e-9,
+                                           lambda x: c0/x*1e-9)
+        self.fdWidget.calcFun.addFun('eV', lambda x: x,
+                                           lambda x: x)
         fdplot = self.fdWidget.get_plot()
         #fqdplot.add_item(make.legend("TR"))
         self.fdSignal  = SignalFT(self, plot=fdplot)
@@ -807,6 +834,7 @@ class MainWindow(QMainWindow):
         self.piUi.startScanBtn.released.connect(self.startMeasureThr)
         self.piUi.stopScanBtn.released.connect(self.stopMeasureThr)
         self.piUi.xAxeChanged.connect(self.tdSignal.updateXAxe)
+        self.piUi.xAxeChanged.connect(self.fdSignal.updateXAxe)
         self.tiepieUi.scpConnected.connect(self.startOsciThr)
         self.tiepieUi.xAxeChanged.connect(self.osciSignal.updateXAxe)
         self.tiepieUi.yAxeChanged.connect(self.osciSignal.updateYAxe)
@@ -907,9 +935,18 @@ class MainWindow(QMainWindow):
     def startMeasureThr(self):
         # rescale tdPlot (updateXAxe)
         self.piUi._xAxeChanged()
+
         # set vCursor to 0
         self.tdSignal.setVCursor(0)
         self.piUi.setCenter()
+
+        # init x axe frequency domain plot to a min and max
+        delays = self.piUi.getDelays_fs()
+        data = np.column_stack((delays, np.zeros(len(delays))))
+        fdAxe = self.fdSignal.computeFFT(data)
+        self.fdSignal.updateXAxe(fdAxe[0,0], fdAxe[-1,0])
+
+        # stop osci thread and start measure thread
         self.stopOsciThr()
         self.stopMeasure = False
         self.measureThr.start()
@@ -921,6 +958,7 @@ class MainWindow(QMainWindow):
     def getMeasureData(self):
         delays = self.piUi.getDelays_fs()
         data = np.column_stack((delays, np.zeros(len(delays))))
+        #self.
         for i, delay in enumerate(delays):
             if not self.stopMeasure:
                 self.piUi.gotoPos_fs(delay)
