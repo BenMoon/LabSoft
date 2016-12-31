@@ -128,15 +128,12 @@ class ObjectFT(QSplitter):
 
     def funChanged(self, functions):
         '''Slot for changing the x axis scanle function'''
-        #print('Hallo', self.xMinMax)
         fun, funInv = functions
         if self.xMinMax is not None:
             xMin, xMax = self.xMinMax
         else:
             print('Error: please get data first before changing axis')
             return
-        #print('funchanged', self.xMinMax)
-        #print('funChange', xMin, xMax)
         if xMin != 0:
             xMin = self.scaleFunInv(xMin) # get back to original value
         if xMax != 0:
@@ -146,7 +143,6 @@ class ObjectFT(QSplitter):
         self.scaleFun = fun
         self.scaleFunInv = funInv
         
-        print('xMinMax', xMin, xMax)
         self.updateXAxe(xMin, xMax)
         # replot data on new axis
         self.updatePlot(np.column_stack((x, y)))
@@ -818,7 +814,7 @@ class MainWindow(QMainWindow):
         #self.stage = self.piUi.stage
         self.tabwidget.addTab(self.tiepieUi, QIcon('Handyscope_HS4.png'),
                               _("Osci"))
-        self.tabwidget.addTab(self.piUi, get_icon('piController.png'),
+        self.tabwidget.addTab(self.piUi, QIcon('piController.png'),
                               _("Stage"))
         self.add_dockwidget(self.tabwidget, _("Inst. sett."))
 #        self.setCentralWidget(self.tabwidget)
