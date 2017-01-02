@@ -12,8 +12,8 @@ from __future__ import unicode_literals, print_function, division
 
 from guidata.qt.QtGui import (QMainWindow, QMessageBox, QSplitter, QComboBox,
                               QMessageBox, QSpinBox,
-                              QVBoxLayout, QGridLayout, QWidget, 
-                              QTabWidget, QLabel, QLineEdit,
+                              QVBoxLayout, QGridLayout, QWidget, QPixmap,
+                              QTabWidget, QLabel, QLineEdit, QSplashScreen,
                               QDoubleValidator, QIntValidator, QValidator,
                               QMenu, QApplication, QCursor, QFont, QPushButton,
                               QSlider, QIcon, QFrame, QSizePolicy)
@@ -456,6 +456,7 @@ class PiStageUi(QSplitter):
         self.centerBtn.setToolTip('Center scan at current stage position')
         self.startScanBtn = QPushButton("Start scan")
         self.stopScanBtn = QPushButton("Stop scan")
+        self.niceBtn = QPushButton('Make it nice')
         # spacer line
         hLine = QFrame()
         hLine.setFrameStyle(QFrame.HLine)
@@ -487,7 +488,8 @@ class PiStageUi(QSplitter):
         layout.addWidget(self.startScanBtn, 14, 0)
         layout.addWidget(self.stopScanBtn, 14, 1)
         layout.addWidget(self.centerBtn, 15, 1)
-        layout.setRowStretch(16, 10)
+        layout.addWidget(self.niceBtn, 16, 1)
+        layout.setRowStretch(17, 10)
         layout.setColumnStretch(2,10)
 
         self.addWidget(layoutWidget)
@@ -526,8 +528,14 @@ class PiStageUi(QSplitter):
     def initStage(self):
         # TODO put this in thread and show egg clock
         if self.stage is not None:
+            ## Create and display the splash screen
+            #splash_pix = QPixmap('icons/piController.png')
+            #splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
+            #splash.setMask(splash_pix.mask())
+            #splash.show()
             # TODO: give choice to select stage
             pitools.startup(self.stage, stages='M-112.1DG-NEW', refmode='FNL')
+            #splash.close()
             # TODO: show dialog for waiting
             self.velocityLabel.setText(
                 'Velocity: {:f}mm/s'.format(self.stage.qVEL()['1']))
@@ -630,7 +638,90 @@ class PiStageUi(QSplitter):
             time.sleep(0.5)
     def __updateCurrPos(self, newPos):
         self.currentPos.setText('{:.7f}'.format(newPos))
+
+class FitWidget(DockableWidget):
+    LOCATION = Qt.RightDockWidgetArea
+    def __init__(self, parent, plotwidgetclass, toolbar):
+        super(DockablePlotWidget, self).__init__(parent)
+        layout = QGridLayout()
+        layout.addWidget(QPushButton("hallo"))
+        self.setLayout(layout)
+
+    def runFitDialog(self):
+        x = self.plot4Curve.get_data()[0]
+        y = self.plot4Curve.get_data()[1]
         
+        def fit(x, params):
+            y0, a, x0, s, tau= params
+            
+            return y0+a*0.5*(erf((x-x0)/(s/(2*np.sqrt(2*np.log(2)))))+1)*np.exp(-(x-x0)/tau)
+
+        y0 = FitParam("Offset", 0., -100., 100.)
+        a = FitParam("Amplitude", y.max(), 0., 10000.)
+        x0 = FitParam("x0", x[y.argmax()], -10., 10.)
+        s = FitParam("FWHM", 0.5, 0., 10.)
+        tau = FitParam("tau", 0.5, 0., 10.)
+        params = [y0, a, x0, s, tau]
+        values = guifit(x, y, fit, params, xlabel="Time (s)", ylabel="Power (a.u.)")
+        self.fitParam = values
+
+    def smooth(self, x, window_len=11, window='hanning'):
+        """smooth the data using a window with requested size.
+
+        This method is based on the convolution of a scaled window with the signal.
+        The signal is prepared by introducing reflected copies of the signal
+        (with the window size) in both ends so that transient parts are minimized
+        in the begining and end part of the output signal.
+
+        input:
+            x: the input signal
+            window_len: the dimension of the smoothing window; should be an odd integer
+            window: the type of window from 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'
+                flat window will produce a moving average smoothing.
+
+        output:
+            the smoothed signal
+
+        example:
+
+        t=linspace(-2,2,0.1)
+        x=sin(t)+randn(len(t))*0.1
+        y=smooth(x)
+
+        see also:
+
+        numpy.hanning, numpy.hamming, numpy.bartlett, numpy.blackman, numpy.convolve
+        scipy.signal.lfilter
+
+        TODO: the window parameter could be the window itself if an array instead of a string
+        NOTE: length(output) != length(input), to correct this: return y[(window_len/2-1):-(window_len/2)] instead of just y.
+
+        http://scipy-cookbook.readthedocs.io/items/SignalSmooth.html
+        """
+
+        if x.ndim != 1:
+            raise ValueError, "smooth only accepts 1 dimension arrays."
+
+        if x.size < window_len:
+            raise ValueError, "Input vector needs to be bigger than window size."
+
+        if window_len<3:
+            return x
+
+        if not window in ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']:
+            raise ValueError, "Window is on of 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'"
+
+        s=np.r_[x[window_len-1:0:-1],x,x[-1:-window_len:-1]]
+        #print(len(s))
+        if window == 'flat': #moving average
+            w=np.ones(window_len,'d')
+        else:
+            w=eval('numpy.'+window+'(window_len)')
+
+        y = np.convolve(w/w.sum(),s,mode='valid')
+
+        return y
+  
 class XAxeCalc(QComboBox):
     idxChanged = Signal(object)
     def __init__(self, parent):
@@ -812,9 +903,9 @@ class MainWindow(QMainWindow):
         self.tiepieUi = TiePieUi(self)
         self.piUi = PiStageUi(self)
         #self.stage = self.piUi.stage
-        self.tabwidget.addTab(self.tiepieUi, QIcon('Handyscope_HS4.png'),
+        self.tabwidget.addTab(self.tiepieUi, QIcon('icons/Handyscope_HS4.png'),
                               _("Osci"))
-        self.tabwidget.addTab(self.piUi, QIcon('piController.png'),
+        self.tabwidget.addTab(self.piUi, QIcon('icons/piController.png'),
                               _("Stage"))
         self.add_dockwidget(self.tabwidget, _("Inst. sett."))
 #        self.setCentralWidget(self.tabwidget)
@@ -831,6 +922,7 @@ class MainWindow(QMainWindow):
         self.piUi.stopScanBtn.released.connect(self.stopMeasureThr)
         self.piUi.xAxeChanged.connect(self.tdSignal.updateXAxe)
         self.piUi.xAxeChanged.connect(self.fdSignal.updateXAxe)
+        self.piUi.niceBtn.released.connect(
         self.tiepieUi.scpConnected.connect(self.startOsciThr)
         self.tiepieUi.xAxeChanged.connect(self.osciSignal.updateXAxe)
         self.tiepieUi.yAxeChanged.connect(self.osciSignal.updateYAxe)
@@ -902,7 +994,16 @@ class MainWindow(QMainWindow):
         self.addDockWidget(location, dockwidget)
         return dockwidget
 
-    
+        def showFSWidget(self):
+        #from guidata.qt.QtGui import QListWidget
+        self.fsBrowser = QDockWidget("4D Fermi Surface Browser", self)
+        self.fsWidget = FermiSurface_Widget(self)
+        
+        self.fsBrowser.setWidget(self.fsWidget)
+        self.fsBrowser.setFloating(True)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.fsBrowser)
+
+        
     def closeEvent(self, event):
         if self.stage is not None:
             self.stage.CloseConnection()
