@@ -11,7 +11,7 @@ FTIR, program to record a spectrum using a michelson interferometer
 from __future__ import unicode_literals, print_function, division
 
 from guidata.qt.QtGui import (QMainWindow, QMessageBox, QSplitter, QComboBox,
-                              QMessageBox, QSpinBox,
+                              QMessageBox, QSpinBox, QHBoxLayout,
                               QVBoxLayout, QGridLayout, QWidget, QPixmap,
                               QTabWidget, QLabel, QLineEdit, QSplashScreen,
                               QDoubleValidator, QIntValidator, QValidator,
@@ -46,8 +46,8 @@ from guiqwt.config import _
 from guiqwt.plot import CurveWidget, ImageWidget
 from guiqwt.builder import make
 
-from pipython import GCSDevice, pitools
-import libtiepie
+#from pipython import GCSDevice, pitools
+#import libtiepie
 
 # set default language to c, so decimal point is '.' not ',' on german systems
 QLocale.setDefault(QLocale.c())
@@ -68,10 +68,10 @@ def dummyPulse(x):
 
 class ObjectFT(QSplitter):
     """Object handling the item list, the selected item properties and plot"""
-    def __init__(self, parent, plot):
+    def __init__(self, parent, plot, col='b'):
         super(ObjectFT, self).__init__(Qt.Vertical, parent)
         self.plot = plot
-        self.curve = make.curve([], [], color='b')
+        self.curve = make.curve([], [], color=col)
         self.plot.add_item(self.curve)
 
         self.hCursor = None
@@ -176,6 +176,63 @@ class ObjectFT(QSplitter):
               
         data = np.column_stack((frq, abs(Y)))
         return data
+    
+    def smooth(self, x, window_len=11, window='hanning'):
+        """smooth the data using a window with requested size.
+
+        This method is based on the convolution of a scaled window with the signal.
+        The signal is prepared by introducing reflected copies of the signal
+        (with the window size) in both ends so that transient parts are minimized
+        in the begining and end part of the output signal.
+
+        input:
+            x: the input signal
+            window_len: the dimension of the smoothing window; should be an odd integer
+            window: the type of window from 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'
+                flat window will produce a moving average smoothing.
+
+        output:
+            the smoothed signal
+
+        example:
+
+        t=linspace(-2,2,0.1)
+        x=sin(t)+randn(len(t))*0.1
+        y=smooth(x)
+
+        see also:
+
+        numpy.hanning, numpy.hamming, numpy.bartlett, numpy.blackman, numpy.convolve
+        scipy.signal.lfilter
+
+        TODO: the window parameter could be the window itself if an array instead of a string
+        NOTE: length(output) != length(input), to correct this: return y[(window_len/2-1):-(window_len/2)] instead of just y.
+
+        http://scipy-cookbook.readthedocs.io/items/SignalSmooth.html
+        """
+
+        if x.ndim != 1:
+            raise(ValueError, "smooth only accepts 1 dimension arrays.")
+
+        if x.size < window_len:
+            raise(ValueError, "Input vector needs to be bigger than window size.")
+
+        if window_len<3:
+            return x
+
+        if not window in ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']:
+            raise(ValueError, "Window is on of 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'")
+
+        s=np.r_[x[window_len-1:0:-1],x,x[-1:-window_len:-1]]
+        #print(len(s))
+        if window == 'flat': #moving average
+            w=np.ones(window_len,'d')
+        else:
+            w=eval('np.'+window+'(window_len)')
+
+        y = np.convolve(w/w.sum(),s,mode='valid')
+
+        return y
 
 class SignalFT(ObjectFT):
     #------ObjectFT API
@@ -639,13 +696,102 @@ class PiStageUi(QSplitter):
     def __updateCurrPos(self, newPos):
         self.currentPos.setText('{:.7f}'.format(newPos))
 
-class FitWidget(DockableWidget):
-    LOCATION = Qt.RightDockWidgetArea
-    def __init__(self, parent, plotwidgetclass, toolbar):
-        super(DockablePlotWidget, self).__init__(parent)
-        layout = QGridLayout()
-        layout.addWidget(QPushButton("hallo"))
+
+class DockableTabWidget(QTabWidget, DockableWidgetMixin):
+    LOCATION = Qt.LeftDockWidgetArea
+    def __init__(self, parent):
+        if PYQT5:
+            super(DockableTabWidget, self).__init__(parent, parent=parent)
+        else:
+            QTabWidget.__init__(self, parent)
+            DockableWidgetMixin.__init__(self, parent)
+
+
+class MakeNicerWidget(DockableTabWidget):
+    LOCATION = Qt.LeftDockWidgetArea
+    updateTdPlot    = Signal(object)
+    updateTdFitPlot = Signal(object)
+    updateFdPlot    = Signal(object)
+    updateFdFitPlot = Signal(object)
+    def __init__(self, parent):
+        super(MakeNicerWidget, self).__init__(parent)
+
+        self.data = np.array([]) # array which holds data
+        
+        # Time domain plot
+        self.tdWidget = DockablePlotWidget(self, CurveWidget)
+        self.tdWidget.calcFun.addFun('fs', lambda x: x,
+                                           lambda x: x)
+        self.tdWidget.calcFun.addFun('µm', lambda x: x*fsDelay*1e3,
+                                           lambda x: x/fsDelay*1e-3)
+        self.tdWidget.calcFun.addFun('mm', lambda x: x*fsDelay,
+                                           lambda x: x/fsDelay)
+        tdPlot = self.tdWidget.get_plot()
+        self.tdSignal  = SignalFT(self, plot=tdPlot)
+        self.tdFit     = SignalFT(self, plot=tdPlot, col='r')
+
+        # Frequency domain plot
+        self.fdWidget = DockablePlotWidget(self, CurveWidget)
+        self.fdWidget.calcFun.addFun('PHz', lambda x: x,
+                                            lambda x: x)
+        self.fdWidget.calcFun.addFun('THz', lambda x: x*1e3,
+                                            lambda x: x*1e-3)
+        self.fdWidget.calcFun.addFun('µm', lambda x: c0/x*1e-9,
+                                           lambda x: c0/x*1e-9)
+        self.fdWidget.calcFun.addFun('eV', lambda x: x,
+                                           lambda x: x)
+        fdplot = self.fdWidget.get_plot()
+        self.fdSignal  = SignalFT(self, plot=fdplot)
+        self.fdFit     = SignalFT(self, plot=fdplot, col='r')
+
+        self.smoothNum = QSpinBox() # gives number of smoothin points
+        self.smoothNum.setMinimum(1)
+        self.smoothNum.setSingleStep(2)
+
+        # Put things together in layouts
+        buttonLayout = QGridLayout()
+        plotLayout   = QVBoxLayout()
+        layout       = QHBoxLayout()
+        plotLayout.addWidget(self.tdWidget)
+        plotLayout.addWidget(self.fdWidget)
+
+        buttonLayout.addWidget(QLabel('Fitting function'), 0, 0)
+        buttonLayout.addWidget(
+            QLineEdit("lambda x,A,f,phi: np.sin(2*np.pi*f*x+phi)"), 1, 0, 1, 2)
+        buttonLayout.addWidget(QLabel('Smooth'), 2, 0)
+        buttonLayout.addWidget(self.smoothNum, 2, 1)
+        buttonLayout.setRowStretch(3, 20)
+
+        layout.addLayout(buttonLayout)
+        layout.addLayout(plotLayout)
         self.setLayout(layout)
+        
+        # connect signals
+        self.updateTdPlot.connect(self.tdSignal.updatePlot)
+        self.updateTdFitPlot.connect(self.tdFit.updatePlot)
+        self.updateFdPlot.connect(lambda data:
+            self.fdSignal.updatePlot(self.fdSignal.computeFFT(data)))
+        self.updateFdFitPlot.connect(lambda data:
+            self.fdFit.updatePlot(self.fdFit.computeFFT(data)))
+        self.smoothNum.valueChanged.connect(self.smoothData)
+
+        self.setData()
+
+
+    def setData(self):
+        data = np.loadtxt('testData.txt', delimiter=',')
+        data[:,1] = (data[:,1]-data[:,1].min())/(data[:,1]-data[:,1].min()).max()
+        self.data = data
+        self.updateTdPlot.emit(data)
+        self.updateFdPlot.emit(data)
+
+    def smoothData(self, i):
+        x = self.data[:,0]
+        x = np.linspace(x[0], x[-1], x.shape[0]+i-1) # get x axis for smooth
+        y = self.data[:,1]
+        self.updateTdPlot.emit(np.column_stack((x, self.tdSignal.smooth(y, i))))
+        self.updateFdPlot.emit(self.fdSignal.computeFFT(
+            np.column_stack((x, self.fdSignal.smooth(y, i)))))
 
     def runFitDialog(self):
         x = self.plot4Curve.get_data()[0]
@@ -665,62 +811,7 @@ class FitWidget(DockableWidget):
         values = guifit(x, y, fit, params, xlabel="Time (s)", ylabel="Power (a.u.)")
         self.fitParam = values
 
-    def smooth(self, x, window_len=11, window='hanning'):
-        """smooth the data using a window with requested size.
 
-        This method is based on the convolution of a scaled window with the signal.
-        The signal is prepared by introducing reflected copies of the signal
-        (with the window size) in both ends so that transient parts are minimized
-        in the begining and end part of the output signal.
-
-        input:
-            x: the input signal
-            window_len: the dimension of the smoothing window; should be an odd integer
-            window: the type of window from 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'
-                flat window will produce a moving average smoothing.
-
-        output:
-            the smoothed signal
-
-        example:
-
-        t=linspace(-2,2,0.1)
-        x=sin(t)+randn(len(t))*0.1
-        y=smooth(x)
-
-        see also:
-
-        numpy.hanning, numpy.hamming, numpy.bartlett, numpy.blackman, numpy.convolve
-        scipy.signal.lfilter
-
-        TODO: the window parameter could be the window itself if an array instead of a string
-        NOTE: length(output) != length(input), to correct this: return y[(window_len/2-1):-(window_len/2)] instead of just y.
-
-        http://scipy-cookbook.readthedocs.io/items/SignalSmooth.html
-        """
-
-        if x.ndim != 1:
-            raise ValueError, "smooth only accepts 1 dimension arrays."
-
-        if x.size < window_len:
-            raise ValueError, "Input vector needs to be bigger than window size."
-
-        if window_len<3:
-            return x
-
-        if not window in ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']:
-            raise ValueError, "Window is on of 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'"
-
-        s=np.r_[x[window_len-1:0:-1],x,x[-1:-window_len:-1]]
-        #print(len(s))
-        if window == 'flat': #moving average
-            w=np.ones(window_len,'d')
-        else:
-            w=eval('numpy.'+window+'(window_len)')
-
-        y = np.convolve(w/w.sum(),s,mode='valid')
-
-        return y
   
 class XAxeCalc(QComboBox):
     idxChanged = Signal(object)
@@ -741,7 +832,7 @@ class XAxeCalc(QComboBox):
     
 class DockablePlotWidget(DockableWidget):
     LOCATION = Qt.RightDockWidgetArea
-    def __init__(self, parent, plotwidgetclass, toolbar):
+    def __init__(self, parent, plotwidgetclass, toolbar=None):
         super(DockablePlotWidget, self).__init__(parent)
         self.toolbar = toolbar
         self.layout = QVBoxLayout()
@@ -750,8 +841,11 @@ class DockablePlotWidget(DockableWidget):
         self.calcFun = XAxeCalc(self)
         self.layout.addWidget(self.calcFun)
         self.setLayout(self.layout)
-        self.setup()
-        
+        if toolbar is None:
+            self.setupNoTB()
+        else:
+            self.setup()
+ 
     def get_plot(self):
         return self.plotwidget.plot
         
@@ -762,22 +856,19 @@ class DockablePlotWidget(DockableWidget):
             self.plotwidget.register_all_image_tools()
         else:
             self.plotwidget.register_all_curve_tools()
-        
+ 
+    def setupNoTB(self):
+        if isinstance(self.plotwidget, ImageWidget):
+            self.plotwidget.register_all_image_tools()
+        else:
+            self.plotwidget.register_all_curve_tools()
+       
     #------DockableWidget API
     def visibility_changed(self, enable):
         """DockWidget visibility has changed"""
         DockableWidget.visibility_changed(self, enable)
         self.toolbar.setVisible(enable)
             
-
-class DockableTabWidget(QTabWidget, DockableWidgetMixin):
-    LOCATION = Qt.LeftDockWidgetArea
-    def __init__(self, parent):
-        if PYQT5:
-            super(DockableTabWidget, self).__init__(parent, parent=parent)
-        else:
-            QTabWidget.__init__(self, parent)
-            DockableWidgetMixin.__init__(self, parent)
 
 
 try:
@@ -922,7 +1013,7 @@ class MainWindow(QMainWindow):
         self.piUi.stopScanBtn.released.connect(self.stopMeasureThr)
         self.piUi.xAxeChanged.connect(self.tdSignal.updateXAxe)
         self.piUi.xAxeChanged.connect(self.fdSignal.updateXAxe)
-        self.piUi.niceBtn.released.connect(
+        self.piUi.niceBtn.released.connect(self.showMakeNicerWidget)
         self.tiepieUi.scpConnected.connect(self.startOsciThr)
         self.tiepieUi.xAxeChanged.connect(self.osciSignal.updateXAxe)
         self.tiepieUi.yAxeChanged.connect(self.osciSignal.updateYAxe)
@@ -994,14 +1085,18 @@ class MainWindow(QMainWindow):
         self.addDockWidget(location, dockwidget)
         return dockwidget
 
-        def showFSWidget(self):
-        #from guidata.qt.QtGui import QListWidget
-        self.fsBrowser = QDockWidget("4D Fermi Surface Browser", self)
-        self.fsWidget = FermiSurface_Widget(self)
+    def showMakeNicerWidget(self):
+        self.makeNicerWidget = MakeNicerWidget(self)
+        self.makeNicerDock = self.add_dockwidget(self.makeNicerWidget, 
+            'Make FFT nicer')
+        #self.makeNicerDock.setFloating(True)
+
+        #self.fsBrowser = QDockWidget("4D Fermi Surface Browser", self)
+        #self.fsWidget = FermiSurface_Widget(self)
         
-        self.fsBrowser.setWidget(self.fsWidget)
-        self.fsBrowser.setFloating(True)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.fsBrowser)
+        #self.fsBrowser.setWidget(self.fsWidget)
+        #self.fsBrowser.setFloating(True)
+        #self.addDockWidget(Qt.RightDockWidgetArea, self.fsBrowser)
 
         
     def closeEvent(self, event):
