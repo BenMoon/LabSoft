@@ -3,6 +3,13 @@
 # Copyright © 2016-2017 CEA
 # Hubertus Bromberger
 # Licensed under the terms of the GPL License
+# TODO:
+# - implement trigger channel
+# - change trigger level to spinbox
+# - change hystereses to spinbox
+# - add trigger channel sensitivity
+# - compute_sum: calculate diff(max-min) for testing
+# - save data
 
 """
 FTIR, program to record a spectrum using a michelson interferometer
@@ -46,8 +53,8 @@ from guiqwt.config import _
 from guiqwt.plot import CurveWidget, ImageWidget
 from guiqwt.builder import make
 
-#from pipython import GCSDevice, pitools
-#import libtiepie
+from pipython import GCSDevice, pitools
+import libtiepie
 
 # set default language to c, so decimal point is '.' not ',' on german systems
 QLocale.setDefault(QLocale.c())
@@ -154,7 +161,7 @@ class ObjectFT(QSplitter):
         xMin, xMax = self.xRange.get_range()
         xMinIdx = x.searchsorted(xMin)
         xMaxIdx = x.searchsorted(xMax)
-        return y[xMinIdx:xMaxIdx+1].sum()
+        return y[xMinIdx:xMaxIdx+1].max()# - y[xMinIdx:xMaxIdx+1].min()
 
     def computeFFT(self, data=None):
         '''assumes x to be fs, thus the fft should be THz'''
@@ -271,9 +278,12 @@ class TiePieUi(QSplitter):
         self.delay.setValidator(QDoubleValidator())
         # trigger stuff
         self.triggLevel = QLineEdit()
+        self.triggLevel.setToolTip('http://api.tiepie.com/libtiepie/0.5/triggering_scpch.html#triggering_scpch_level')
         self.triggLevel.setText('0.') # init value otherwise there's trouble with signal changing index of sensitivity
         self.triggLevel.setValidator(QDoubleValidator(0., 1., 3))
         self.hystereses = QLineEdit()
+        self.hystereses.setText('0.05')
+        self.hystereses.setToolTip('http://api.tiepie.com/libtiepie/0.5/triggering_scpch.html#triggering_scpch_hysteresis')
         self.hystereses.setValidator(QDoubleValidator(0., 1., 3))
         self.triggKind = QComboBox()     
         # do averages
@@ -313,6 +323,7 @@ class TiePieUi(QSplitter):
         self.chSens.currentIndexChanged.connect(self._changeSens)
         self.frequency.returnPressed.connect(self._changeFreq)
         self.recordLen.returnPressed.connect(self._changeRecordLength)
+        self.triggCh.currentIndexChanged.connect(self._changeTrigCh)
         self.triggLevel.returnPressed.connect(self._triggLevelChanged)
         self.triggLevel.textChanged.connect(self._check_state)        
         self.hystereses.returnPressed.connect(self._setHystereses)
@@ -349,7 +360,8 @@ class TiePieUi(QSplitter):
             
 
             # Enable channel 1 for measurement
-            self.scp.channels[0].enabled = True
+            # http://api.tiepie.com/libtiepie/0.5/group__scp__ch__enabled.html
+            self.scp.channels[0].enabled = True # by default all channels are enabled
             self.scp.range = 0.2
             self.scp.coupling = libtiepie.CK_DCV # DC Volt
             
@@ -418,9 +430,23 @@ class TiePieUi(QSplitter):
             self.triggLevelChanged.emit(
                 float(self.triggLevel.text())*2*yMax-yMax)
 
+    def _changeTrigCh(self, newTrig):
+        print('new trigger channel', newTrig)
+        scope = self.scp
+        # Disable all channel trigger sources
+        for ch in scope.channels:
+            ch.trigger.enabled = False
+        # enable trigger on newly selected channel
+        ch = scope.channels[newTrig]
+        ch.trigger.enabled = True
+        ch.trigger.kind = libtiepie.TK_RISINGEDGE
+        ch.trigger.levels[0] = float(self.triggLevel.text())
+        ch.trigger.hystereses[0] = float(self.hystereses.text())
+        
+        
     def _triggLevelChanged(self):
         with QMutexLocker(self.mutex):
-            idx = self.measCh.currentIndex()
+            idx = self.triggCh.currentIndex()
             ch = self.scp.channels[idx]
             ch.trigger.levels[0] = float(self.triggLevel.text())
             self.triggLevelChanged.emit(
@@ -1159,7 +1185,8 @@ class MainWindow(QMainWindow):
                 #print('measuring at', delay)
                 #y = dummyPulse(delay)
                 #data[i,1] = y
-                data[i,1] = tmp[:,1].mean()
+                #data[i,1] = tmp[:,1].mean()
+                data[i,1] = self.osciSignal.computeSum()
                 #time.sleep(0.05)
                 self.updateTdPlot.emit(data)
                 self.updateFdPlot.emit(data)
