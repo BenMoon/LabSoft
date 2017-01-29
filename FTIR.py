@@ -145,7 +145,7 @@ class ObjectFT(QSplitter):
             xMin = self.scaleFunInv(xMin) # get back to original value
         if xMax != 0:
             xMax = self.scaleFunInv(xMax)
-        x, y  = self.curve.get_data()
+        x, y = self.curve.get_data()
         x    = self.scaleFunInv(x)
         self.scaleFun = fun
         self.scaleFunInv = funInv
@@ -162,6 +162,11 @@ class ObjectFT(QSplitter):
         xMinIdx = x.searchsorted(xMin)
         xMaxIdx = x.searchsorted(xMax)
         return y[xMinIdx:xMaxIdx+1].max()# - y[xMinIdx:xMaxIdx+1].min()
+
+    def getData(self, fun):
+        x, y = self.curve.get_data()
+        return fun(x), y
+        
 
     def computeFFT(self, data=None):
         '''assumes x to be fs, thus the fft should be THz'''
@@ -1070,12 +1075,16 @@ class MainWindow(QMainWindow):
                                     icon=get_std_icon("DialogCloseButton"),
                                     tip=_("Quit application"),
                                     triggered=self.close)
+        saveData = create_action(self, _("Save"), shortcut="Ctrl+S",
+                                    icon=get_std_icon("DialogSaveButton"),
+                                    tip=_("Save data"),
+                                    triggered=self.saveData)
         triggerTest_action = create_action(self, _("Stop Osci"),
                                     shortcut="Ctrl+O",
                                     icon=get_icon('fileopen.png'),
                                     tip=_("Open an image"),
                                     triggered=self.stopOsciThr)
-        add_actions(file_menu, (triggerTest_action, None, self.quit_action))
+        add_actions(file_menu, (triggerTest_action, saveData, None, self.quit_action))
         
 
         # Eventually add an internal console (requires 'spyderlib')
@@ -1131,6 +1140,35 @@ class MainWindow(QMainWindow):
         if self.console is not None:
             self.console.exit_interpreter()
         event.accept()
+
+    def saveData(self):
+        data = []
+        foo = self.tdWidget.calcFun.functions
+        texts = [self.tdWidget.calcFun.itemText(i) for i in range(len(foo))]
+        tmp = ['td_x_{:s},td_y_{:s}'.format(i, i) for i in texts] 
+        header = ','.join(tmp)
+        header += ','
+        for fun in foo:
+            x, y = self.tdSignal.getData(fun)
+            data.append((x, y))
+            print(len(x), len(y))
+
+        foo = self.fdWidget.calcFun.functions
+        texts = [self.fdWidget.calcFun.itemText(i) for i in range(len(foo))]
+        tmp = ['fd_x_{:s},fd_y_{:s}'.format(i, i) for i in texts] 
+        header += ','.join(tmp)
+        for fun in foo:
+            x, y = self.fdSignal.getData(fun)
+            data.append((x, y))
+            print(len(x), len(y))
+       
+        print(np.asarray(data).shape)
+        print(header)
+        import datetime
+        now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        #np.savetxt('data/
+        #self.tdSignal.getData()
+        #self.fqSignal.getData()
 
     #def getStage(self, gcs):
     #    self.stage = gcs
