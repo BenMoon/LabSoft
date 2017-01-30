@@ -1142,33 +1142,35 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def saveData(self):
-        data = []
+        import datetime
+        now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+
+        # save time domain
         foo = self.tdWidget.calcFun.functions
         texts = [self.tdWidget.calcFun.itemText(i) for i in range(len(foo))]
         tmp = ['td_x_{:s},td_y_{:s}'.format(i, i) for i in texts] 
         header = ','.join(tmp)
-        header += ','
-        for fun in foo:
-            x, y = self.tdSignal.getData(fun)
-            data.append((x, y))
-            print(len(x), len(y))
-
+        dataTd = np.zeros((self.tdSignal.getData(foo[0][0])[0].shape[0],
+                          2*len(foo)))
+        for i, fun in enumerate(foo):
+            x, y =  self.tdSignal.getData(fun[0])# [0]: fun, [1]: inverse fun
+            dataTd[:,2*i] = x
+            dataTd[:,2*i+1] = y
+        np.savetxt('data/{:s}_TD.txt'.format(now), dataTd, header=header)
+        
+        # save frequency domain
         foo = self.fdWidget.calcFun.functions
         texts = [self.fdWidget.calcFun.itemText(i) for i in range(len(foo))]
         tmp = ['fd_x_{:s},fd_y_{:s}'.format(i, i) for i in texts] 
         header += ','.join(tmp)
+        dataFd = np.zeros((self.fdSignal.getData(foo[0][0])[0].shape[0],
+                          2*len(foo)))
         for fun in foo:
-            x, y = self.fdSignal.getData(fun)
-            data.append((x, y))
-            print(len(x), len(y))
-       
-        print(np.asarray(data).shape)
-        print(header)
-        import datetime
-        now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-        #np.savetxt('data/
-        #self.tdSignal.getData()
-        #self.fqSignal.getData()
+            x, y = self.fdSignal.getData(fun[0])
+            dataFd[:,2*i] = x
+            dataFd[:,2*i+1] = y
+        np.savetxt('data/{:s}_FD.txt'.format(now), dataFd, header=header)
+               
 
     #def getStage(self, gcs):
     #    self.stage = gcs
