@@ -1157,6 +1157,7 @@ class MainWindow(QMainWindow):
             dataTd[:,2*i] = x
             dataTd[:,2*i+1] = y
         np.savetxt('data/{:s}_TD.txt'.format(now), dataTd, header=header)
+        self.tdSignal.plot.save_widget('data/{:s}_TD.png'.format(now))
         
         # save frequency domain
         foo = self.fdWidget.calcFun.functions
@@ -1170,6 +1171,13 @@ class MainWindow(QMainWindow):
             dataFd[:,2*i] = x
             dataFd[:,2*i+1] = y
         np.savetxt('data/{:s}_FD.txt'.format(now), dataFd, header=header)
+        self.fdSignal.plot.save_widget('data/{:s}_FD.png'.format(now))
+
+        # TODO: maybe put this in status bar
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+        msg.setText('Data saved')
+        msg.exec_()
                
 
     #def getStage(self, gcs):
