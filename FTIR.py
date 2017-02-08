@@ -36,7 +36,6 @@ import os.path as osp
 import os
 import numpy as np
 import time
-from scipy.constants import c
 
 #from guidata.dataset.datatypes import DataSet, ValueProp
 #from guidata.dataset.dataitems import (IntItem, FloatArrayItem, StringItem,
@@ -66,10 +65,7 @@ APP_DESC = _("""Record a spectrum using a michelson<br>
 interferometer with a delay stage""")
 VERSION = '0.0.1'
 
-nAir = 1.000292
-c0   = c/nAir
-# t = x/c
-fsDelay = c0*1e-15*1e3/2 # eine fs auf delay stage im mm, 1fs=fsDelay, 1mm=1/fsDelay
+
 fwhm = 2*np.sqrt(2*np.log(2))
 
 def dummyPulse(x):
@@ -507,7 +503,6 @@ class MainWindow(QMainWindow):
     def getMeasureData(self):
         delays = self.piUi.getDelays_fs()
         data = np.column_stack((delays, np.zeros(len(delays))))
-        #self.
         for i, delay in enumerate(delays):
             if not self.stopMeasure:
                 self.piUi.gotoPos_fs(delay)

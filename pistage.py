@@ -5,7 +5,7 @@
 from guidata.qt.QtGui import (QSplitter, QComboBox, QGridLayout, QLineEdit,
                               QIntValidator, QDoubleValidator, QWidget, QPushButton,
                               QSpinBox, QLabel, QMessageBox, QSlider, QFrame, QSizePolicy)
-from guidata.qt.QtCore import (Qt, Signal, QMutex, QMutexLocker, )
+from guidata.qt.QtCore import (QThread, Qt, Signal, QMutex, QMutexLocker, )
 
 from guidata.py3compat import to_text_string
 from guidata.qtwidgets import DockableWidget, DockableWidgetMixin
@@ -13,12 +13,19 @@ from guiqwt.plot import CurveWidget, ImageWidget
 from guiqwt.builder import make
 
 import numpy as np
+import time
 
 from pipython import GCSDevice, pitools
-from genericthread import GenericThread
+from genericthread import GenericThread, GenericWorker
+
+from scipy.constants import c
+nAir = 1.000292
+c0   = c/nAir
+# t = x/c
+fsDelay = c0*1e-15*1e3/2 # eine fs auf delay stage im mm, 1fs=fsDelay, 1mm=1/fsDelay
 
 class PiStageUi(QSplitter):
-    stageConnected = Signal()
+    stageConnected = Signal() # gets emitted if stage was sucessfully connected
     stopScan = Signal()
     xAxeChanged = Signal(object, object)
     updateCurrPos = Signal(object)
@@ -124,9 +131,21 @@ class PiStageUi(QSplitter):
             lambda x=1: self.moveRel_mm(float(self.deltaMove_mm.text())))
         self.deltaMoveMinus_mm.released.connect(
             lambda x=-1: self.moveRel_mm(float(self.deltaMove_mm.text()), x))
+        
+        
         # thread for updating position
-        self.currPosThr = GenericThread(self.__getCurrPos)
+        #self.currPosThr = GenericThread(self.__getCurrPos)
         self.updateCurrPos.connect(self.__updateCurrPos)
+        self.currPos_thread = QThread() # create the QThread
+        self.currPos_thread.start()
+
+        # This causes my_worker.run() to eventually execute in my_thread:
+        self.currPos_worker = GenericWorker(self.__getCurrPos)
+        self.currPos_worker.moveToThread(self.currPos_thread)
+        # my_worker.finished.connect(self.xxx)
+
+        #self.threadPool.append(my_thread)
+        #self.my_worker = my_worker
         
 
     def connectStage(self):
@@ -243,7 +262,8 @@ class PiStageUi(QSplitter):
 
     def __startCurrPosThr(self):
         self.stopCurrPosThr = False
-        self.currPosThr.start()
+        #self.currPosThr.start()
+        self.currPos_worker.start.emit()
     def __stopCurrPosThr(self):
         self.stopCurrPosThr = True
         while(self.currPosThr.isRunning()):
@@ -256,5 +276,15 @@ class PiStageUi(QSplitter):
                 oldPos = newPos
                 self.updateCurrPos.emit(newPos)
             time.sleep(0.5)
+            
     def __updateCurrPos(self, newPos):
         self.currentPos.setText('{:.7f}'.format(newPos))
+        
+if __name__ == '__main__':
+    from guidata.qt.QtGui import QApplication
+    import sys
+    app = QApplication(sys.argv)
+    #test = MyApp()
+    test = PiStageUi(None)
+    test.show()
+    app.exec_()
