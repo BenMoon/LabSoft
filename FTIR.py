@@ -17,21 +17,18 @@ FTIR, program to record a spectrum using a michelson interferometer
 
 #from __future__ import unicode_literals, print_function, division
 
-from guidata.qt.QtGui import (QMainWindow, QMessageBox, QSplitter, QComboBox,
-                              QMessageBox, QSpinBox, QHBoxLayout,
-                              QVBoxLayout, QGridLayout, QWidget, QPixmap,
-                              QTabWidget, QLabel, QLineEdit, QSplashScreen,
-                              QDoubleValidator, QIntValidator, QValidator,
-                              QMenu, QApplication, QCursor, QFont, QPushButton,
-                              QSlider, QIcon, QFrame, QSizePolicy)
-from guidata.qt.QtCore import (Qt, QT_VERSION_STR, PYQT_VERSION_STR, Signal,
-                               Slot, QThread, QLocale)
+from guidata.qt.QtGui import (QMainWindow, QMessageBox, 
+                              QSpinBox, QHBoxLayout,
+                              QVBoxLayout, QGridLayout,  
+                              QTabWidget, QLabel, QLineEdit,  
+                              QFont, QIcon)
+from guidata.qt.QtCore import (Qt, Signal, QThread, QLocale)
 from guidata.qt import PYQT5
-from guidata.qt.compat import getopenfilenames, getsavefilename
+#from guidata.qt.compat import getopenfilenames, getsavefilename
 #from guiqwt.signals import SIG_MARKER_CHANGED
 
 import sys
-import platform
+#import platform
 import os.path as osp
 import os
 import numpy as np
@@ -44,19 +41,18 @@ import time
 #from guidata.dataset.qtwidgets import DataSetEditGroupBox
 from guidata.configtools import get_icon
 from guidata.qthelpers import create_action, add_actions, get_std_icon
-from guidata.qtwidgets import DockableWidget, DockableWidgetMixin
+from guidata.qtwidgets import DockableWidgetMixin
 from guiqwt.plot import CurveWidget
 #from guidata.utils import update_dataset
-from guidata.py3compat import to_text_string
+#from guidata.py3compat import to_text_string
 
 from guiqwt.config import _
 
 # local imports
-#from pipython import GCSDevice, pitools
 from plotSignal import SignalFT, DockablePlotWidget
 from tiepie import TiePieUi
-from pistage import PiStageUi
-from genericthread import GenericThread
+from pistage import PiStageUi, c0, fsDelay
+from genericthread import GenericWorker
 
 # set default language to c, so decimal point is '.' not ',' on german systems
 QLocale.setDefault(QLocale.c())
@@ -64,7 +60,6 @@ APP_NAME = _("FTIR")
 APP_DESC = _("""Record a spectrum using a michelson<br>
 interferometer with a delay stage""")
 VERSION = '0.0.1'
-
 
 fwhm = 2*np.sqrt(2*np.log(2))
 
@@ -343,9 +338,17 @@ class MainWindow(QMainWindow):
             self.fdSignal.updatePlot(self.fdSignal.computeFFT(data)))
         
         # create threads
-        self.osciThr = GenericThread(self.getOsciData)
-        self.measureThr = GenericThread(self.getMeasureData)
+        #self.osciThr = GenericThread(self.getOsciData)
+        self.osciThr = QThread()
+        self.osciThr.start()
+        self.osciWorker = GenericWorker(self.getOsciData)
+        self.osciWorker.moveToThread(self.osciThr)
         
+        #self.measureThr = GenericThread(self.getMeasureData)
+        self.measureThr = QThread()
+        self.measureThr.start()
+        self.measureWorker = GenericWorker(self.getMeasureData)
+        self.measureWorker.moveToThread(self.measureThr)        
         
 
         # File menu
@@ -466,11 +469,14 @@ class MainWindow(QMainWindow):
 
     def startOsciThr(self):
         self.stopOsci = False
-        self.osciThr.start()
+        #self.osciThr.start()
+        self.osciWorker.start.emit()
     def stopOsciThr(self):
         self.stopOsci = True
-        while(self.osciThr.isRunning()):
-            time.sleep(0.03)
+        # TODO: not quite shure how to do this with the worker solution.
+        # finished signal is emitted but this function should wait for worker to finish?!?
+        #while(self.osciThr.isRunning()):
+        #    time.sleep(0.03)
     def getOsciData(self):
         while not self.stopOsci:
             data = self.tiepieUi.getData()
@@ -478,6 +484,9 @@ class MainWindow(QMainWindow):
             time.sleep(0.5)
 
     def startMeasureThr(self):
+        # stop osci thread and start measure thread
+        self.stopOsciThr()
+        
         # rescale tdPlot (updateXAxe)
         self.piUi._xAxeChanged()
 
@@ -491,14 +500,13 @@ class MainWindow(QMainWindow):
         fdAxe = self.fdSignal.computeFFT(data)
         self.fdSignal.updateXAxe(fdAxe[0,0], fdAxe[-1,0])
 
-        # stop osci thread and start measure thread
-        self.stopOsciThr()
         self.stopMeasure = False
-        self.measureThr.start()
+        #self.measureThr.start()
+        self.measureWorker.start.emit()
     def stopMeasureThr(self):
         self.stopMeasure = True
-        while(self.measureThr.isRunning()):
-            time.sleep(0.03)
+        #while(self.measureThr.isRunning()):
+        #    time.sleep(0.03)
         self.startOsciThr()
     def getMeasureData(self):
         delays = self.piUi.getDelays_fs()

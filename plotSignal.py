@@ -3,12 +3,12 @@
 
 #from __future__ import unicode_literals, print_function, division
 
-from guidata.qt.QtGui import (QSplitter, QCursor, QComboBox, QVBoxLayout)
+from guidata.qt.QtGui import (QSplitter, QComboBox, QVBoxLayout)
 from guidata.qt.QtCore import (Qt, Signal)
 
 from guidata.py3compat import to_text_string
-from guidata.qtwidgets import DockableWidget, DockableWidgetMixin
-from guiqwt.plot import CurveWidget, ImageWidget
+from guidata.qtwidgets import DockableWidget
+from guiqwt.plot import ImageWidget
 from guiqwt.builder import make
 
 import numpy as np

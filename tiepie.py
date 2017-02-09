@@ -4,12 +4,7 @@
 from guidata.qt.QtGui import (QSplitter, QComboBox, QGridLayout, QLineEdit,
                               QIntValidator, QDoubleValidator, QWidget, QPushButton,
                               QSpinBox, QLabel, QMessageBox)
-from guidata.qt.QtCore import (Qt, Signal, QMutex, QMutexLocker, )
-
-from guidata.py3compat import to_text_string
-from guidata.qtwidgets import DockableWidget, DockableWidgetMixin
-from guiqwt.plot import CurveWidget, ImageWidget
-from guiqwt.builder import make
+from guidata.qt.QtCore import (Signal, QMutex, QMutexLocker, )
 
 import numpy as np
 import time

@@ -2,21 +2,16 @@
 
 # class to provide access to Pi stages
 
-from guidata.qt.QtGui import (QSplitter, QComboBox, QGridLayout, QLineEdit,
+from guidata.qt.QtGui import (QSplitter, QGridLayout, QLineEdit,
                               QIntValidator, QDoubleValidator, QWidget, QPushButton,
-                              QSpinBox, QLabel, QMessageBox, QSlider, QFrame, QSizePolicy)
-from guidata.qt.QtCore import (QThread, Qt, Signal, QMutex, QMutexLocker, )
-
-from guidata.py3compat import to_text_string
-from guidata.qtwidgets import DockableWidget, DockableWidgetMixin
-from guiqwt.plot import CurveWidget, ImageWidget
-from guiqwt.builder import make
+                              QLabel, QMessageBox, QSlider, QFrame, QSizePolicy)
+from guidata.qt.QtCore import (QThread, Qt, Signal)
 
 import numpy as np
 import time
 
 from pipython import GCSDevice, pitools
-from genericthread import GenericThread, GenericWorker
+from genericthread import GenericWorker
 
 from scipy.constants import c
 nAir = 1.000292
