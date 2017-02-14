@@ -19,13 +19,29 @@ class GenericWorker(QObject):
         self.function = function
         self.args = args
         self.kwargs = kwargs
+        self.running = False
         self.start.connect(self.run)
+        self.finished.connect(self.__changeRunning)
 
     @Slot()
     def run(self, *args, **kwargs):
         #print(args, kwargs)
+        self.running = True
         self.function(*self.args, **self.kwargs)
         self.finished.emit()
+        
+    @Slot()
+    def __changeRunning(self):
+        '''
+        Change running status variable
+        '''
+        self.running = False
+        
+    def isRunning(self):
+        '''
+        Query status of worker
+        '''       
+        return self.running
 
 
 

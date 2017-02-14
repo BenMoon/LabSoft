@@ -246,6 +246,7 @@ class MainWindow(QMainWindow):
         
         self.setWindowTitle(APP_NAME)
 
+        ###############
         # Osci live
         curveplot_toolbar = self.addToolBar(_("Curve Plotting Toolbar"))
         self.osciCurveWidget = DockablePlotWidget(self, CurveWidget,
@@ -263,6 +264,7 @@ class MainWindow(QMainWindow):
         self.osciSignal.addHCursor(0)
         self.osciSignal.addBounds()
         
+        ##############
         # Time domain plot
         self.tdWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
@@ -277,6 +279,7 @@ class MainWindow(QMainWindow):
         self.tdSignal  = SignalFT(self, plot=tdPlot)
         self.tdSignal.addVCursor(0)
 
+        ##################
         # Frequency domain plot
         self.fdWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
@@ -293,6 +296,7 @@ class MainWindow(QMainWindow):
         #fqdplot.add_item(make.legend("TR"))
         self.fdSignal  = SignalFT(self, plot=fdplot)
 
+        ##############
         # Main window widgets
         self.tabwidget = DockableTabWidget(self)
         #self.tabwidget.setMaximumWidth(500)
@@ -312,7 +316,7 @@ class MainWindow(QMainWindow):
         self.fd_dock = self.add_dockwidget(self.fdWidget,
                                               title=_("Frequency Domain"))
 
-
+        ################
         # connect signals
         self.piUi.startScanBtn.released.connect(self.startMeasureThr)
         self.piUi.stopScanBtn.released.connect(self.stopMeasureThr)
@@ -337,6 +341,7 @@ class MainWindow(QMainWindow):
         self.updateFdPlot.connect(lambda data:
             self.fdSignal.updatePlot(self.fdSignal.computeFFT(data)))
         
+        ################
         # create threads
         #self.osciThr = GenericThread(self.getOsciData)
         self.osciThr = QThread()
@@ -350,7 +355,7 @@ class MainWindow(QMainWindow):
         self.measureWorker = GenericWorker(self.getMeasureData)
         self.measureWorker.moveToThread(self.measureThr)        
         
-
+        ################
         # File menu
         file_menu = self.menuBar().addMenu(_("File"))
         self.quit_action = create_action(self, _("Quit"), shortcut="Ctrl+Q",
@@ -368,7 +373,7 @@ class MainWindow(QMainWindow):
                                     triggered=self.stopOsciThr)
         add_actions(file_menu, (triggerTest_action, saveData, None, self.quit_action))
         
-
+        ##############
         # Eventually add an internal console (requires 'spyderlib')
         self.sift_proxy = SiftProxy(self)
         if DockableConsole is None:
@@ -475,8 +480,8 @@ class MainWindow(QMainWindow):
         self.stopOsci = True
         # TODO: not quite shure how to do this with the worker solution.
         # finished signal is emitted but this function should wait for worker to finish?!?
-        #while(self.osciThr.isRunning()):
-        #    time.sleep(0.03)
+        while(self.osciWorker.isRunning()):
+            time.sleep(0.03)
     def getOsciData(self):
         while not self.stopOsci:
             data = self.tiepieUi.getData()
@@ -505,8 +510,8 @@ class MainWindow(QMainWindow):
         self.measureWorker.start.emit()
     def stopMeasureThr(self):
         self.stopMeasure = True
-        #while(self.measureThr.isRunning()):
-        #    time.sleep(0.03)
+        while(self.measureWorker.isRunning()):
+            time.sleep(0.03)
         self.startOsciThr()
     def getMeasureData(self):
         delays = self.piUi.getDelays_fs()
