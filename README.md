@@ -4,7 +4,7 @@ The program is so far is only tested on windows, but should in principal also wo
 
 Requirements:
 - PiPython: library which is a up to now unofficial python wrapper from PI for their own GCS library available upon request
-- LibTiePie: library from TiePie for accessing the scope, just install it as described on the website
+- LibTiePie: library from TiePie for accessing the scope, just install it as described on the website (http://www.tiepie.com/en/SDK/LibTiePie)
 - GuiQwt (>=3.0): The libray I use for plotting
 - PyQt5: Gui library
 - Python >3.5 probably, I haven't tested it with a lower version
