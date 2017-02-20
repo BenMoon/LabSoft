@@ -246,3 +246,12 @@ class TiePieUi(QSplitter):
         else:
             color = '#f6989d' # red
         sender.setStyleSheet('QLineEdit { background-color: %s }' % color)
+
+if __name__ == '__main__':
+    from guidata.qt.QtGui import QApplication
+    import sys
+    app = QApplication(sys.argv)
+    #test = MyApp()
+    test = TiePieUi(None)
+    test.show()
+    app.exec_()
