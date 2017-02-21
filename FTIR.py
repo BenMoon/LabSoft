@@ -49,10 +49,10 @@ from guiqwt.plot import CurveWidget
 from guiqwt.config import _
 
 # local imports
-from plotSignal import SignalFT, DockablePlotWidget
-from tiepie import TiePieUi
-from pistage import PiStageUi, c0, fsDelay
-from genericthread import GenericWorker
+from Helpers.plotSignal import SignalFT, DockablePlotWidget
+from Helpers.genericthread import GenericWorker
+from Instruments.tiepie import TiePieUi
+from Instruments.pistage import PiStageUi, c0, fsDelay
 
 # set default language to c, so decimal point is '.' not ',' on german systems
 QLocale.setDefault(QLocale.c())
