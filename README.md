@@ -12,3 +12,7 @@ Requirements:
 Installation:
 
 Up to now there's now setup.py or anything. Just copy the files in a directory of your choice and run FTIR.py file.
+
+
+# PowerMeter
+Software for acquiring data from Gentec Maestro using its Ethernet interface.
