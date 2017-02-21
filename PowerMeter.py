@@ -40,22 +40,15 @@ from guiqwt.plot import CurveWidget
 from guiqwt.config import _
 
 # local imports
-from plotSignal import SignalFT, DockablePlotWidget
-from gentec import MaestroUi
-from genericthread import GenericWorker
+from Helpers.plotSignal import SignalFT, DockablePlotWidget
+from Helpers.genericthread import GenericWorker
+from Instruments.gentec import MaestroUi
 
 # set default language to c, so decimal point is '.' not ',' on german systems
 QLocale.setDefault(QLocale.c())
-APP_NAME = _("FTIR")
-APP_DESC = _("""Record a spectrum using a michelson<br>
-interferometer with a delay stage""")
+APP_NAME = _("Powermeter")
+APP_DESC = _("""Get data from Gentec Maestro using its ethernet interface""")
 VERSION = '0.0.1'
-
-fwhm = 2*np.sqrt(2*np.log(2))
-
-def dummyPulse(x):
-    A, mu, s, y0 = 1, 0, 40, 0
-    return A*np.exp(-0.5*((x-mu)/s)**2)*np.cos(2*np.pi*0.1*x)+y0
 
 
 
@@ -68,113 +61,6 @@ class DockableTabWidget(QTabWidget, DockableWidgetMixin):
             QTabWidget.__init__(self, parent)
             DockableWidgetMixin.__init__(self, parent)
 
-
-class MakeNicerWidget(DockableTabWidget):
-    LOCATION = Qt.LeftDockWidgetArea
-    updateTdPlot    = Signal(object)
-    updateTdFitPlot = Signal(object)
-    updateFdPlot    = Signal(object)
-    updateFdFitPlot = Signal(object)
-    def __init__(self, parent):
-        super(MakeNicerWidget, self).__init__(parent)
-
-        self.data = np.array([]) # array which holds data
-        
-        # Time domain plot
-        self.tdWidget = DockablePlotWidget(self, CurveWidget)
-        self.tdWidget.calcFun.addFun('fs', lambda x: x,
-                                           lambda x: x)
-        self.tdWidget.calcFun.addFun('µm', lambda x: x*fsDelay*1e3,
-                                           lambda x: x/fsDelay*1e-3)
-        self.tdWidget.calcFun.addFun('mm', lambda x: x*fsDelay,
-                                           lambda x: x/fsDelay)
-        tdPlot = self.tdWidget.get_plot()
-        self.tdSignal  = SignalFT(self, plot=tdPlot)
-        self.tdFit     = SignalFT(self, plot=tdPlot, col='r')
-
-        # Frequency domain plot
-        self.fdWidget = DockablePlotWidget(self, CurveWidget)
-        self.fdWidget.calcFun.addFun('PHz', lambda x: x,
-                                            lambda x: x)
-        self.fdWidget.calcFun.addFun('THz', lambda x: x*1e3,
-                                            lambda x: x*1e-3)
-        self.fdWidget.calcFun.addFun('µm', lambda x: c0/x*1e-9,
-                                           lambda x: c0/x*1e-9)
-        self.fdWidget.calcFun.addFun('eV', lambda x: x,
-                                           lambda x: x)
-        fdplot = self.fdWidget.get_plot()
-        self.fdSignal  = SignalFT(self, plot=fdplot)
-        self.fdFit     = SignalFT(self, plot=fdplot, col='r')
-
-        self.smoothNum = QSpinBox() # gives number of smoothin points
-        self.smoothNum.setMinimum(1)
-        self.smoothNum.setSingleStep(2)
-
-        # Put things together in layouts
-        buttonLayout = QGridLayout()
-        plotLayout   = QVBoxLayout()
-        layout       = QHBoxLayout()
-        plotLayout.addWidget(self.tdWidget)
-        plotLayout.addWidget(self.fdWidget)
-
-        buttonLayout.addWidget(QLabel('Fitting function'), 0, 0)
-        buttonLayout.addWidget(
-            QLineEdit("lambda x,A,f,phi: np.sin(2*np.pi*f*x+phi)"), 1, 0, 1, 2)
-        buttonLayout.addWidget(QLabel('Smooth'), 2, 0)
-        buttonLayout.addWidget(self.smoothNum, 2, 1)
-        buttonLayout.setRowStretch(3, 20)
-
-        layout.addLayout(buttonLayout)
-        layout.addLayout(plotLayout)
-        self.setLayout(layout)
-        
-        # connect signals
-        self.updateTdPlot.connect(self.tdSignal.updatePlot)
-        self.updateTdFitPlot.connect(self.tdFit.updatePlot)
-        self.updateFdPlot.connect(lambda data:
-            self.fdSignal.updatePlot(self.fdSignal.computeFFT(data)))
-        self.updateFdFitPlot.connect(lambda data:
-            self.fdFit.updatePlot(self.fdFit.computeFFT(data)))
-        self.smoothNum.valueChanged.connect(self.smoothData)
-
-        self.setData()
-
-
-    def setData(self):
-        data = np.loadtxt('testData.txt', delimiter=',')
-        data[:,1] = (data[:,1]-data[:,1].min())/(data[:,1]-data[:,1].min()).max()
-        self.data = data
-        self.updateTdPlot.emit(data)
-        self.updateFdPlot.emit(data)
-
-    def smoothData(self, i):
-        x = self.data[:,0]
-        x = np.linspace(x[0], x[-1], x.shape[0]+i-1) # get x axis for smooth
-        y = self.data[:,1]
-        self.updateTdPlot.emit(np.column_stack((x, self.tdSignal.smooth(y, i))))
-        self.updateFdPlot.emit(self.fdSignal.computeFFT(
-            np.column_stack((x, self.fdSignal.smooth(y, i)))))
-
-    def runFitDialog(self):
-        x = self.plot4Curve.get_data()[0]
-        y = self.plot4Curve.get_data()[1]
-        
-        def fit(x, params):
-            y0, a, x0, s, tau= params
-            
-            return y0+a*0.5*(erf((x-x0)/(s/(2*np.sqrt(2*np.log(2)))))+1)*np.exp(-(x-x0)/tau)
-
-        y0 = FitParam("Offset", 0., -100., 100.)
-        a = FitParam("Amplitude", y.max(), 0., 10000.)
-        x0 = FitParam("x0", x[y.argmax()], -10., 10.)
-        s = FitParam("FWHM", 0.5, 0., 10.)
-        tau = FitParam("tau", 0.5, 0., 10.)
-        params = [y0, a, x0, s, tau]
-        values = guifit(x, y, fit, params, xlabel="Time (s)", ylabel="Power (a.u.)")
-        self.fitParam = values
-
-
-  
 
             
 
@@ -237,7 +123,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
 
         ###############
-        # Osci live
+        # Powermeter record
         curveplot_toolbar = self.addToolBar(_("Curve Plotting Toolbar"))
         self.osciCurveWidget = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
@@ -254,60 +140,22 @@ class MainWindow(QMainWindow):
         self.osciSignal.addHCursor(0)
         self.osciSignal.addBounds()
         
-        ##############
-        # Time domain plot
-        self.tdWidget = DockablePlotWidget(self, CurveWidget,
-                                              curveplot_toolbar)
-        self.tdWidget.calcFun.addFun('fs', lambda x: x,
-                                           lambda x: x)
-        self.tdWidget.calcFun.addFun('µm', lambda x: x*fsDelay*1e3,
-                                           lambda x: x/fsDelay*1e-3)
-        self.tdWidget.calcFun.addFun('mm', lambda x: x*fsDelay,
-                                           lambda x: x/fsDelay)
-        tdPlot = self.tdWidget.get_plot()
-        #tdPlot.add_item(make.legend("TR"))
-        self.tdSignal  = SignalFT(self, plot=tdPlot)
-        self.tdSignal.addVCursor(0)
-
-        ##################
-        # Frequency domain plot
-        self.fdWidget = DockablePlotWidget(self, CurveWidget,
-                                              curveplot_toolbar)
-        self.fdWidget.calcFun.addFun('PHz', lambda x: x,
-                                            lambda x: x)
-        self.fdWidget.calcFun.addFun('THz', lambda x: x*1e3,
-                                            lambda x: x*1e-3)
-        # x = PHz -> 1e15, µm = 1e-6
-        self.fdWidget.calcFun.addFun('µm', lambda x: c0/x*1e-9,
-                                           lambda x: c0/x*1e-9)
-        self.fdWidget.calcFun.addFun('eV', lambda x: x,
-                                           lambda x: x)
-        fdplot = self.fdWidget.get_plot()
-        #fqdplot.add_item(make.legend("TR"))
-        self.fdSignal  = SignalFT(self, plot=fdplot)
 
         ##############
         # Main window widgets
         self.tabwidget = DockableTabWidget(self)
         #self.tabwidget.setMaximumWidth(500)
-        self.tiepieUi = TiePieUi(self)
-        self.piUi = PiStageUi(self)
-        #self.stage = self.piUi.stage
-        self.tabwidget.addTab(self.tiepieUi, QIcon('icons/Handyscope_HS4.png'),
-                              _("Osci"))
-        self.tabwidget.addTab(self.piUi, QIcon('icons/piController.png'),
-                              _("Stage"))
+        self.maestroUi = MaestroUi(self)
+        self.tabwidget.addTab(self.maestroUi, QIcon('icons/Handyscope_HS4.png'),
+                              _("Maestro"))
         self.add_dockwidget(self.tabwidget, _("Inst. sett."))
 #        self.setCentralWidget(self.tabwidget)
         self.osci_dock = self.add_dockwidget(self.osciCurveWidget,
-                                              title=_("Osciloscope"))
-        self.td_dock = self.add_dockwidget(self.tdWidget,
-                                              title=_("Time Domain"))
-        self.fd_dock = self.add_dockwidget(self.fdWidget,
-                                              title=_("Frequency Domain"))
+                                              title=_("Powermeter"))
 
         ################
         # connect signals
+        '''
         self.piUi.startScanBtn.released.connect(self.startMeasureThr)
         self.piUi.stopScanBtn.released.connect(self.stopMeasureThr)
         self.piUi.xAxeChanged.connect(self.tdSignal.updateXAxe)
@@ -330,10 +178,11 @@ class MainWindow(QMainWindow):
         self.updateTdPlot.connect(self.tdSignal.updatePlot)
         self.updateFdPlot.connect(lambda data:
             self.fdSignal.updatePlot(self.fdSignal.computeFFT(data)))
-        
+        '''
         ################
         # create threads
         #self.osciThr = GenericThread(self.getOsciData)
+        '''
         self.osciThr = QThread()
         self.osciThr.start()
         self.osciWorker = GenericWorker(self.getOsciData)
@@ -343,7 +192,8 @@ class MainWindow(QMainWindow):
         self.measureThr = QThread()
         self.measureThr.start()
         self.measureWorker = GenericWorker(self.getMeasureData)
-        self.measureWorker.moveToThread(self.measureThr)        
+        self.measureWorker.moveToThread(self.measureThr)
+        '''
         
         ################
         # File menu
