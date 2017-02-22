@@ -125,20 +125,16 @@ class MainWindow(QMainWindow):
         ###############
         # Powermeter record
         curveplot_toolbar = self.addToolBar(_("Curve Plotting Toolbar"))
-        self.osciCurveWidget = DockablePlotWidget(self, CurveWidget,
+        self.curveWidget1 = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
-        self.osciCurveWidget.calcFun.addFun('s', lambda x: x,
+        self.curveWidget1.calcFun.addFun('s', lambda x: x,
                                                  lambda x: x)
-        self.osciCurveWidget.calcFun.addFun('ms', lambda x: x*1e3,
-                                                  lambda x: x*1e-3)
-        self.osciCurveWidget.calcFun.addFun('µs', lambda x: x*1e6,
-                                                  lambda x: x*1e-6)
-        osciPlot = self.osciCurveWidget.get_plot()
-        #osciPlot.set_axis_title('bottom', 'Time (s)')
-        #osciplot.add_item(make.legend("TR"))
-        self.osciSignal = SignalFT(self, plot=osciPlot)
-        self.osciSignal.addHCursor(0)
-        self.osciSignal.addBounds()
+        self.curveWidget1.calcFun.addFun('min', lambda x: x/60,
+                                                  lambda x: x*60)
+        self.curveWidget1.calcFun.addFun('hour', lambda x: x/3600,
+                                                  lambda x: x*3600)
+        plot1 = self.curveWidget1.get_plot()
+        self.signal1 = SignalFT(self, plot=plot1)
         
 
         ##############
@@ -150,11 +146,13 @@ class MainWindow(QMainWindow):
                               _("Maestro"))
         self.add_dockwidget(self.tabwidget, _("Inst. sett."))
 #        self.setCentralWidget(self.tabwidget)
-        self.osci_dock = self.add_dockwidget(self.osciCurveWidget,
+        self.dock1 = self.add_dockwidget(self.curveWidget1,
                                               title=_("Powermeter"))
 
         ################
         # connect signals
+        self.maestroUi.newPlotData.connect(self.signal1.updatePlot)
+        self.curveWidget1.calcFun.idxChanged.connect(self.signal1.funChanged)
         '''
         self.piUi.startScanBtn.released.connect(self.startMeasureThr)
         self.piUi.stopScanBtn.released.connect(self.stopMeasureThr)
@@ -170,7 +168,7 @@ class MainWindow(QMainWindow):
         self.tdSignal.plot.SIG_MARKER_CHANGED.connect(
             lambda x=None: self.piUi.newOffset(self.tdSignal.getVCursor()))
 
-        self.osciCurveWidget.calcFun.idxChanged.connect(self.osciSignal.funChanged)
+        
         self.tdWidget.calcFun.idxChanged.connect(self.tdSignal.funChanged)
         self.fdWidget.calcFun.idxChanged.connect(self.fdSignal.funChanged)
 
@@ -211,7 +209,7 @@ class MainWindow(QMainWindow):
                                     icon=get_icon('fileopen.png'),
                                     tip=_("Open an image"),
                                     triggered=self.stopOsciThr)
-        add_actions(file_menu, (triggerTest_action, saveData, None, self.quit_action))
+        #add_actions(file_menu, (triggerTest_action, saveData, None, self.quit_action))
         
         ##############
         # Eventually add an internal console (requires 'spyderlib')
