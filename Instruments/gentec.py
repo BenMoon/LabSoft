@@ -28,6 +28,7 @@ class MaestroUi(QSplitter):
         self.measure = False
         self.runDataThr = True
         self.measureData = []
+        self.startTime = None
 
 
         layoutWidget = QWidget()
@@ -63,7 +64,7 @@ class MaestroUi(QSplitter):
         layout.addWidget(self.currValDisp, 5, 1)
         layout.addWidget(self.startMeasBtn, 6, 0)
         layout.addWidget(self.stopMeasBtn, 6, 1)
-
+        layout.setRowStretch(7, 10)
         self.addWidget(layoutWidget)
 
         ##############
@@ -96,6 +97,10 @@ class MaestroUi(QSplitter):
 
     def _startMeasure(self):
         self.measure = True
+        self.measureData = [] # reinitialize measure data array
+        time.sleep(0.1) # time to wait for first data to arrive
+        self.startTime = datetime.now() # datetime object
+        
     def _stopMeasure(self):
         self.measure = False
 
@@ -120,7 +125,9 @@ class MaestroUi(QSplitter):
             for i in range(len(tmpData)):
                 tmpData[i] = self.avgData.get()
                 if self.measure:
-                    self.measureData.append(tmpData[i])
+                    self.measureData.append(
+                        [(tmpData[i,0]-self.startTime).total_seconds(),
+                         tmpData[i,1]])
             #print('mean', tmpData.mean())
             self.updateAvgTxt.emit(str(tmpData[:,1].mean()))
             if self.measure:
