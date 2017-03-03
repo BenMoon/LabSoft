@@ -42,6 +42,7 @@ from guiqwt.config import _
 # local imports
 from Helpers.plotSignal import SignalFT, DockablePlotWidget
 from Helpers.genericthread import GenericWorker
+from Helpers.fileui import FileUi
 from Instruments.gentec import MaestroUi
 
 # set default language to c, so decimal point is '.' not ',' on german systems
@@ -60,9 +61,6 @@ class DockableTabWidget(QTabWidget, DockableWidgetMixin):
         else:
             QTabWidget.__init__(self, parent)
             DockableWidgetMixin.__init__(self, parent)
-
-
-            
 
 
 try:
@@ -142,8 +140,10 @@ class MainWindow(QMainWindow):
         self.tabwidget = DockableTabWidget(self)
         #self.tabwidget.setMaximumWidth(500)
         self.maestroUi = MaestroUi(self)
+        self.fileUi = FileUi(self)
         self.tabwidget.addTab(self.maestroUi, QIcon('icons/Handyscope_HS4.png'),
                               _("Maestro"))
+        self.tabwidget.addTab(self.fileUi, get_icon('filesave.png'), _('File'))
         self.add_dockwidget(self.tabwidget, _("Inst. sett."))
 #        self.setCentralWidget(self.tabwidget)
         self.dock1 = self.add_dockwidget(self.curveWidget1,
@@ -153,6 +153,8 @@ class MainWindow(QMainWindow):
         # connect signals
         self.maestroUi.newPlotData.connect(self.signal1.updatePlot)
         self.curveWidget1.calcFun.idxChanged.connect(self.signal1.funChanged)
+        self.fileUi.saveTxtBtn.released.connect(self.saveDataTxt)
+        self.fileUi.saveHdfBtn.released.connect(self.saveDataHDF5)
         '''
         self.piUi.startScanBtn.released.connect(self.startMeasureThr)
         self.piUi.stopScanBtn.released.connect(self.stopMeasureThr)
@@ -244,20 +246,6 @@ class MainWindow(QMainWindow):
         dockwidget, location = child.create_dockwidget(title)
         self.addDockWidget(location, dockwidget)
         return dockwidget
-
-    def showMakeNicerWidget(self):
-        self.makeNicerWidget = MakeNicerWidget(self)
-        self.makeNicerDock = self.add_dockwidget(self.makeNicerWidget, 
-            'Make FFT nicer')
-        #self.makeNicerDock.setFloating(True)
-
-        #self.fsBrowser = QDockWidget("4D Fermi Surface Browser", self)
-        #self.fsWidget = FermiSurface_Widget(self)
-        
-        #self.fsBrowser.setWidget(self.fsWidget)
-        #self.fsBrowser.setFloating(True)
-        #self.addDockWidget(Qt.RightDockWidgetArea, self.fsBrowser)
-
         
     def closeEvent(self, event):
         if self.stage is not None:
@@ -266,9 +254,9 @@ class MainWindow(QMainWindow):
             self.console.exit_interpreter()
         event.accept()
 
-    def saveData(self):
+    def saveDataTxt(self):
         import datetime
-        now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S_Maestro')
 
         # save time domain
         foo = self.tdWidget.calcFun.functions
@@ -291,7 +279,7 @@ class MainWindow(QMainWindow):
         header += ','.join(tmp)
         dataFd = np.zeros((self.fdSignal.getData(foo[0][0])[0].shape[0],
                           2*len(foo)))
-        for fun in foo:
+        for i, fun in enumerate(foo):
             x, y = self.fdSignal.getData(fun[0])
             dataFd[:,2*i] = x
             dataFd[:,2*i+1] = y
@@ -304,78 +292,61 @@ class MainWindow(QMainWindow):
         msg.setText('Data saved')
         msg.exec_()
                
+    def saveDataHDF5(self, fileName=None):
+        import datetime
+        import h5py
 
-    #def getStage(self, gcs):
-    #    self.stage = gcs
-    #    print(dir(self.stage))
-    #    print(self.stage.qPOS())
+        if fileName is None:
+            now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S_FTIR')
+        else:
+            now = fileName
+        with h5py.File('data/{:s}.h5'.format(now)) as f:
+            f.attrs['comments'] = self.fileUi.comment.text())
+            f.attrs['stage'] = ''
+            f.attrs['stage_settings'] = ''
+            f.attrs['detector'] = ''
+            f.attrs['detector_settings'] = ''
 
-    def startOsciThr(self):
-        self.stopOsci = False
-        #self.osciThr.start()
-        self.osciWorker.start.emit()
-    def stopOsciThr(self):
-        self.stopOsci = True
-        # TODO: not quite shure how to do this with the worker solution.
-        # finished signal is emitted but this function should wait for worker to finish?!?
-        while(self.osciWorker.isRunning()):
-            time.sleep(0.03)
-    def getOsciData(self):
-        while not self.stopOsci:
-            data = self.tiepieUi.getData()
-            self.updateOsciPlot.emit(data)
-            time.sleep(0.5)
+            # save time domain
+            foo = self.tdWidget.calcFun.functions
+            texts = [self.tdWidget.calcFun.itemText(i) for i in range(len(foo))]
+            dt = []
+            for i in texts:
+                dt.append(('x_{:s}'.format(i), np.float))
+                dt.append(('y_{:s}'.format(i), np.float))
+            dt = np.dtype(dt)
+            dataTd = np.zeros(self.tdSignal.getData(foo[0][0])[0].shape[0],
+                              dtype=dt)
+            for i, fun in enumerate(foo):
+                x, y =  self.tdSignal.getData(fun[0])# [0]: fun, [1]: inverse fun
+                dataTd['x_{:s}'.format(texts[i])] = x
+                dataTd['y_{:s}'.format(texts[i])] = y
+            dset = f.create_dataset('timeDomain', data=dataTd)
+            self.tdSignal.plot.save_widget('data/{:s}_TD.png'.format(now))    
+       
+            # save frequency domain
+            foo = self.tdWidget.calcFun.functions
+            texts = [self.tdWidget.calcFun.itemText(i) for i in range(len(foo))]
+            dt = []
+            for i in texts:
+                dt.append(('x_{:s}'.format(i), np.float))
+                dt.append(('y_{:s}'.format(i), np.float))
+            dt = np.dtype(dt)
+            dataFd = np.zeros(self.fdSignal.getData(foo[0][0])[0].shape[0],
+                              dtype=dt)
+            for i, fun in enumerate(foo):
+                x, y = self.fdSignal.getData(fun[0])
+                dataFd['x_{:s}'.format(texts[i])] = x
+                dataFd['y_{:s}'.format(texts[i])] = y
+            #np.savetxt('data/{:s}_FD.txt'.format(now), dataFd, header=header)
+            dset = f.create_dataset('frequencyDomain', data=dataFd)
+            self.fdSignal.plot.save_widget('data/{:s}_FD.png'.format(now))
 
-    def startMeasureThr(self):
-        # stop osci thread and start measure thread
-        self.stopOsciThr()
-        
-        # rescale tdPlot (updateXAxe)
-        self.piUi._xAxeChanged()
-
-        # set vCursor to 0
-        self.tdSignal.setVCursor(0)
-        self.piUi.setCenter()
-
-        # init x axe frequency domain plot to a min and max
-        delays = self.piUi.getDelays_fs()
-        data = np.column_stack((delays, np.zeros(len(delays))))
-        fdAxe = self.fdSignal.computeFFT(data)
-        self.fdSignal.updateXAxe(fdAxe[0,0], fdAxe[-1,0])
-
-        self.stopMeasure = False
-        #self.measureThr.start()
-        self.measureWorker.start.emit()
-    def stopMeasureThr(self):
-        self.stopMeasure = True
-        while(self.measureWorker.isRunning()):
-            time.sleep(0.03)
-        self.startOsciThr()
-    def getMeasureData(self):
-        delays = self.piUi.getDelays_fs()
-        data = np.column_stack((delays, np.zeros(len(delays))))
-        for i, delay in enumerate(delays):
-            if not self.stopMeasure:
-                self.piUi.gotoPos_fs(delay)
-                tmp = self.tiepieUi.getData()
-                self.updateOsciPlot.emit(tmp)
-                #print('measuring at', delay)
-                #y = dummyPulse(delay)
-                #data[i,1] = y
-                #data[i,1] = tmp[:,1].mean()
-                data[i,1] = self.osciSignal.computeSum()
-                #time.sleep(0.05)
-                self.updateTdPlot.emit(data)
-                self.updateFdPlot.emit(data)
-            else:
-                break
-        self.startOsciThr()
-    """
-    def _newCenter(self):
-        '''Function call when 'Center Here' triggered'''
-        newOffset = self.tdSignal.getVCursor()
-        self.piUi._centerPos(newOffset)
-    """     
+        # TODO: maybe put this in status bar
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+        msg.setText('Data saved')
+        msg.exec_()
 
 
 def run():
