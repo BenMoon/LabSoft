@@ -127,7 +127,7 @@ class PiStageUi(QSplitter):
         self.deltaMoveMinus_mm.released.connect(
             lambda x=-1: self.moveRel_mm(float(self.deltaMove_mm.text()), x))
         
-        
+        ################
         # thread for updating position
         #self.currPosThr = GenericThread(self.__getCurrPos)
         self.updateCurrPos.connect(self.__updateCurrPos)
