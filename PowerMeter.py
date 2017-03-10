@@ -205,12 +205,7 @@ class MainWindow(QMainWindow):
         saveData = create_action(self, _("Save"), shortcut="Ctrl+S",
                                     icon=get_std_icon("DialogSaveButton"),
                                     tip=_("Save data"),
-                                    triggered=self.saveData)
-        triggerTest_action = create_action(self, _("Stop Osci"),
-                                    shortcut="Ctrl+O",
-                                    icon=get_icon('fileopen.png'),
-                                    tip=_("Open an image"),
-                                    triggered=self.stopOsciThr)
+                                    triggered=self.saveDataHDF5)
         #add_actions(file_menu, (triggerTest_action, saveData, None, self.quit_action))
         
         ##############
@@ -248,8 +243,7 @@ class MainWindow(QMainWindow):
         return dockwidget
         
     def closeEvent(self, event):
-        if self.stage is not None:
-            self.stage.CloseConnection()
+        self.maestroUi.closeEvent(event)
         if self.console is not None:
             self.console.exit_interpreter()
         event.accept()
@@ -296,51 +290,25 @@ class MainWindow(QMainWindow):
         import datetime
         import h5py
 
+        # isoformat, seconds, value
         if fileName is None:
-            now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S_FTIR')
+            now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S_Power')
         else:
-            now = fileName
+            now = fileName + '_Power'
         with h5py.File('data/{:s}.h5'.format(now)) as f:
-            f.attrs['comments'] = self.fileUi.comment.text())
-            f.attrs['stage'] = ''
-            f.attrs['stage_settings'] = ''
+            f.attrs['comments'] = self.fileUi.comment.toPlainText()
             f.attrs['detector'] = ''
             f.attrs['detector_settings'] = ''
 
-            # save time domain
-            foo = self.tdWidget.calcFun.functions
-            texts = [self.tdWidget.calcFun.itemText(i) for i in range(len(foo))]
-            dt = []
-            for i in texts:
-                dt.append(('x_{:s}'.format(i), np.float))
-                dt.append(('y_{:s}'.format(i), np.float))
-            dt = np.dtype(dt)
-            dataTd = np.zeros(self.tdSignal.getData(foo[0][0])[0].shape[0],
-                              dtype=dt)
-            for i, fun in enumerate(foo):
-                x, y =  self.tdSignal.getData(fun[0])# [0]: fun, [1]: inverse fun
-                dataTd['x_{:s}'.format(texts[i])] = x
-                dataTd['y_{:s}'.format(texts[i])] = y
-            dset = f.create_dataset('timeDomain', data=dataTd)
-            self.tdSignal.plot.save_widget('data/{:s}_TD.png'.format(now))    
-       
-            # save frequency domain
-            foo = self.tdWidget.calcFun.functions
-            texts = [self.tdWidget.calcFun.itemText(i) for i in range(len(foo))]
-            dt = []
-            for i in texts:
-                dt.append(('x_{:s}'.format(i), np.float))
-                dt.append(('y_{:s}'.format(i), np.float))
-            dt = np.dtype(dt)
-            dataFd = np.zeros(self.fdSignal.getData(foo[0][0])[0].shape[0],
-                              dtype=dt)
-            for i, fun in enumerate(foo):
-                x, y = self.fdSignal.getData(fun[0])
-                dataFd['x_{:s}'.format(texts[i])] = x
-                dataFd['y_{:s}'.format(texts[i])] = y
-            #np.savetxt('data/{:s}_FD.txt'.format(now), dataFd, header=header)
-            dset = f.create_dataset('frequencyDomain', data=dataFd)
-            self.fdSignal.plot.save_widget('data/{:s}_FD.png'.format(now))
+            # save powermeter data
+            dt = np.dtype([('iso_time', 'S26'), 
+                   ('seconds', np.float),
+                   ('power', np.float)])
+            data = np.asarray(self.maestroUi.measureData, dtype=dt)
+            dset = f.create_dataset('power', data=data)
+            dset.attrs['device'] = 'Gentec Maestro'
+            dset.attrs['device_serial'] = '1234'
+            self.signal1.plot.save_widget('data/{:s}.png'.format(now))    
 
         # TODO: maybe put this in status bar
         msg = QMessageBox()
