@@ -5,10 +5,12 @@
 
 from guidata.qt.QtGui import (QSplitter, QPushButton, QVBoxLayout, QHBoxLayout,
                               QGroupBox, QCheckBox, QLabel, QWidget, QPlainTextEdit)
-from guidata.qt.QtCore import (Qt, Signal)
+from guidata.qt.QtCore import (Qt, QThread, Signal)
 
+import time
+from datetime import datetime
 import numpy as np
-
+from Helpers.genericthread import GenericWorker
 
 
 class FileUi(QSplitter):
@@ -57,15 +59,26 @@ class FileUi(QSplitter):
         self.saveTxtCheck.stateChanged.connect(self.__makeFileName)
         self.saveHdfCheck.stateChanged.connect(self.__makeFileName)
 
+        ##############
+        # thread for streaming data to file
+        #self.updateCurrPos.connect(self.__updateCurrPos)
+        self.stream_thread = QThread() # create the QThread
+        self.stream_thread.start()
+        self.stream_worker = GenericWorker(self.__streamFile)
+        self.stream_worker.moveToThread(self.stream_thread)
+
     def __makeFileName(self, state):
-        from datetime import datetime
-        
-        print(state)
         if state == 2:
             self.fileName = datetime.now().strftime('%Y%m%d-%H%M%S')
+            self.stream_worker.start.emit()
         else:
             self.fileName = None
-        print(self.fileName)
+
+    def __streamFile(self):
+        while self.saveHdfCheck.isChecked():
+            self.saveHdfBtn.released.emit()
+            time.sleep(10)
+        
 
            
 if __name__ == '__main__':
