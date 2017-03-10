@@ -286,16 +286,17 @@ class MainWindow(QMainWindow):
         msg.setText('Data saved')
         msg.exec_()
                
-    def saveDataHDF5(self, fileName=None):
+    def saveDataHDF5(self):
         import datetime
         import h5py
 
-        # isoformat, seconds, value
+        fileName = self.fileUi.fileName
+        print(fileName)
         if fileName is None:
             now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S_Power')
         else:
             now = fileName + '_Power'
-        with h5py.File('data/{:s}.h5'.format(now)) as f:
+        with h5py.File('data/{:s}.h5'.format(now), 'w') as f:
             f.attrs['comments'] = self.fileUi.comment.toPlainText()
             f.attrs['detector'] = ''
             f.attrs['detector_settings'] = ''
@@ -311,10 +312,12 @@ class MainWindow(QMainWindow):
             self.signal1.plot.save_widget('data/{:s}.png'.format(now))    
 
         # TODO: maybe put this in status bar
+        '''
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Information)
         msg.setText('Data saved')
         msg.exec_()
+        '''
 
 
 def run():
