@@ -79,21 +79,22 @@ class ObjectFT(QSplitter):
     def funChanged(self, functions):
         '''Slot for changing the x axis scanle function'''
         fun, funInv = functions
+        x, y = self.curve.get_data()
         if self.xMinMax is not None:
             xMin, xMax = self.xMinMax
         else:
-            print('Error: please get data first before changing axis')
-            return
+            #print('Error: please get data first before changing axis')
+            #return
+            xMin, xMax = x.min(), x.max()
         if xMin != 0:
             xMin = self.scaleFunInv(xMin) # get back to original value
         if xMax != 0:
             xMax = self.scaleFunInv(xMax)
-        x, y = self.curve.get_data()
         x    = self.scaleFunInv(x)
         self.scaleFun = fun
         self.scaleFunInv = funInv
         
-        self.updateXAxe(xMin, xMax)
+        #self.updateXAxe(xMin, xMax) # TODO: check if this also workes with FTIR
         # replot data on new axis
         self.updatePlot(np.column_stack((x, y)))
         #print(fun(self.xRange[0]), fun(self.xRange[1]))       

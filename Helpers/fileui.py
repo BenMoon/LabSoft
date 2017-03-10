@@ -4,7 +4,7 @@
 #from __future__ import unicode_literals, print_function, division
 
 from guidata.qt.QtGui import (QSplitter, QPushButton, QVBoxLayout, QHBoxLayout,
-                              QGroupBox, QCheckBox, QLabel, QWidget, QTextEdit)
+                              QGroupBox, QCheckBox, QLabel, QWidget, QPlainTextEdit)
 from guidata.qt.QtCore import (Qt, Signal)
 
 import numpy as np
@@ -19,7 +19,7 @@ class FileUi(QSplitter):
         layout = QVBoxLayout()
         layoutWidget.setLayout(layout)
 
-        self.comment = QTextEdit()
+        self.comment = QPlainTextEdit()
         self.fileName = None
         self.saveTxtCheck = QCheckBox('Save Txt')
         self.saveHdfCheck = QCheckBox('Save HDF5')
