@@ -126,12 +126,13 @@ class MaestroUi(QSplitter):
                 tmpData[i] = self.avgData.get()
                 if self.measure:
                     self.measureData.append(
-                        [(tmpData[i,0]-self.startTime).total_seconds(),
-                         tmpData[i,1]])
+                        (tmpData[i,0].isoformat().encode(),
+                         (tmpData[i,0]-self.startTime).total_seconds(),
+                         tmpData[i,1]))
             #print('mean', tmpData.mean())
             self.updateAvgTxt.emit(str(tmpData[:,1].mean()))
             if self.measure:
-                self.newPlotData.emit(np.asarray(self.measureData))
+                self.newPlotData.emit(np.float_(np.asarray(self.measureData)[:,1:]))
         self.avgData.task_done()
 
     #@Slot()
