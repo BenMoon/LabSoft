@@ -16,7 +16,8 @@ import time
 
 from guidata.qt.QtGui import (QSplitter, QComboBox, QGridLayout, QLineEdit,
                               QIntValidator, QWidget, QPushButton,
-                              QSpinBox, QLabel, QMessageBox)
+                              QSpinBox, QLabel, QMessageBox, QCheckBox,
+                              QFileDialog, QPlainTextEdit)
 from guidata.qt.QtCore import (QThread, Signal, QMutex, QMutexLocker, )
 
 
@@ -32,6 +33,7 @@ class GreatEyesUi(QSplitter):
         super().__init__(parent)
 
         self.camera = None
+        self.directory = 'H:'
 
         layoutWidget = QWidget()
         layout = QGridLayout()
@@ -77,6 +79,14 @@ class GreatEyesUi(QSplitter):
         self.updateInterEdit = QLineEdit()
         self.updateInterEdit.setText("2")
         self.updateInterEdit.setValidator(QIntValidator(1, 3600))
+        self.loi = QSpinBox()
+        self.loi.setRange(1, 511) # one pixel less as the camera has
+        self.deltaPixels = QSpinBox()
+        self.deltaPixels.setRange(0, 256)
+        self.autoSave = QCheckBox("Auto save")
+        self.getDirectory = QPushButton('Choose Dir')
+        self.dirPath = QLineEdit(self.directory)
+        self.comment = QPlainTextEdit()
 
         ##############
         # put elements in layout
@@ -93,14 +103,24 @@ class GreatEyesUi(QSplitter):
         layout.addWidget(self.temperatureEdit, 5, 1)
         layout.addWidget(QLabel('update every n-seconds'), 6, 0)
         layout.addWidget(self.updateInterEdit, 6, 1)
+        layout.addWidget(QLabel('Pixel of interest'), 7, 0)
+        layout.addWidget(self.loi, 7, 1)
+        layout.addWidget(QLabel('Δ pixels'), 8, 0)
+        layout.addWidget(self.deltaPixels, 8, 1)
+        layout.addWidget(self.autoSave, 9, 1)
+        layout.addWidget(self.getDirectory, 10, 0)
+        layout.addWidget(self.dirPath, 10, 1)
+        layout.addWidget(QLabel('Comment:'), 11, 0)
+        layout.addWidget(self.comment, 12, 0, 1, 2)
+        layout.setRowStretch(13, 10)
 
         self.addWidget(layoutWidget)
 
 
         #################
         # connect elements for functionality
-        self.openCamBtn.released.connect(self.openCam)
-
+        self.openCamBtn.released.connect(self.__openCam)
+        self.getDirectory.released.connect(self.__chooseDir)
         
         ################
         # thread for updating position
@@ -110,9 +130,10 @@ class GreatEyesUi(QSplitter):
         # This causes my_worker.run() to eventually execute in my_thread:
         self.currImage_worker = GenericWorker(self.__getCurrImage)
         self.currImage_worker.moveToThread(self.currImage_thread)
-        
+       
 
-    def openCam(self):
+
+    def __openCam(self):
         self.camera = greatEyes()
         if not self.camera.connected:
             msg = QMessageBox()
@@ -134,6 +155,14 @@ class GreatEyesUi(QSplitter):
 
         # start aquisition
         self.__startCurrImageThr()
+
+    def __chooseDir(self):
+        self.directory = QFileDialog.getExistingDirectory(self,
+                "Choose directory",
+                self.directory)
+        self.dirPath.setText(self.directory)
+        print(self.directory)
+
 
     def __startCurrImageThr(self):
         #self.stopCurrPosThr = False
