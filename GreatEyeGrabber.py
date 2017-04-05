@@ -24,6 +24,7 @@ import os.path as osp
 import os
 import numpy as np
 import time
+import datetime
 
 #from guidata.dataset.datatypes import DataSet, ValueProp
 #from guidata.dataset.dataitems import (IntItem, FloatArrayItem, StringItem,
@@ -40,7 +41,7 @@ from guiqwt.plot import CurveWidget, ImageWidget
 from guiqwt.config import _
 
 # local imports
-from Helpers.plotSignal import SignalFT, DockablePlotWidget
+from Helpers.plotSignal import SignalFT, ImageFT, DockablePlotWidget
 from Helpers.genericthread import GenericWorker
 from Helpers.fileui import FileUi
 from Instruments.greatEyes import GreatEyesUi
@@ -117,13 +118,24 @@ class MainWindow(QMainWindow):
         
         self.setWindowTitle(APP_NAME)
 
+        ##############
+        # Camera image
+        self.image_toolbar = self.addToolBar(_("Image Processing Toolbar")) 
+        imagevis_toolbar = self.addToolBar(_("Image Visualization Toolbar")) 
+        self.imageWidget1 = DockablePlotWidget(self, ImageWidget,
+                                              imagevis_toolbar)
+        self.image1 = ImageFT(self, self.imageWidget1.get_plot())
+        self.image1.addHCursor(1)
+        self.image1.addRoi(0, 1, 2048, 1)
+        #self.image1.setup(self.image_toolbar)
+        
         ###############
         # camera line out
         curveplot_toolbar = self.addToolBar(_("Curve Plotting Toolbar"))
         self.curveWidget1 = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
         self.curveWidget1.calcFun.addFun('s', lambda x: x,
-                                                 lambda x: x)
+                                              lambda x: x)
         plot1 = self.curveWidget1.get_plot()
         self.signal1 = SignalFT(self, plot=plot1)
         
@@ -133,20 +145,22 @@ class MainWindow(QMainWindow):
         self.tabwidget = DockableTabWidget(self)
         #self.tabwidget.setMaximumWidth(500)
         self.greateyesUi = GreatEyesUi(self)
-        self.fileUi = FileUi(self)
         self.tabwidget.addTab(self.greateyesUi, QIcon('icons/Handyscope_HS4.png'),
                               _("greateyes"))
-        self.tabwidget.addTab(self.fileUi, get_icon('filesave.png'), _('File'))
+        #self.fileUi = FileUi(self)
+        #self.tabwidget.addTab(self.fileUi, get_icon('filesave.png'), _('File'))
         self.add_dockwidget(self.tabwidget, _("Inst. sett."))
 #        self.setCentralWidget(self.tabwidget)
-        self.dock1 = self.add_dockwidget(self.curveWidget1,
-                                              title=_("Powermeter"))
+        self.dock1 = self.add_dockwidget(self.imageWidget1,
+                                              title=_("Camera"))
+        self.dock2 = self.add_dockwidget(self.curveWidget1,
+                                              title=_("Lineout"))
 
         ################
         # connect signals
-        self.greateyesUi.newPlotData.connect(
-                lambda x: self.signal1.updatePlot(np.column_stack((np.arange(0,
-                    x.shape[1]), x.sum(axis=0)))))
+        self.greateyesUi.newPlotData.connect(lambda x: 
+                self.image1.updatePlot(x, datetime.datetime.now().isoformat()))
+        self.greateyesUi.newPlotData.connect(self.updateLineOut)
         #self.curveWidget1.calcFun.idxChanged.connect(self.signal1.funChanged)
         #self.fileUi.saveTxtBtn.released.connect(self.saveDataTxt)
         #self.fileUi.saveHdfBtn.released.connect(self.saveDataHDF5)
@@ -171,6 +185,7 @@ class MainWindow(QMainWindow):
 
         self.updateOsciPlot.connect(self.osciSignal.updatePlot)
         self.updateTdPlot.connect(self.tdSignal.updatePlot)
+
         self.updateFdPlot.connect(lambda data:
             self.fdSignal.updatePlot(self.fdSignal.computeFFT(data)))
         '''
@@ -233,6 +248,15 @@ class MainWindow(QMainWindow):
         if self.console is not None:
             self.console.exit_interpreter()
         event.accept()
+
+    def updateLineOut(self, image):
+        loi  = self.greateyesUi.loi.value()
+        dLoi = self.greateyesUi.deltaPixels.value()
+        data = image[(loi-dLoi):(loi+dLoi+1),:]
+        self.signal1.updatePlot(np.column_stack((np.arange(0,
+               data.shape[1]), data.sum(axis=0))))
+        self.image1.setHCursor(loi)
+        self.image1.setRoi(0, loi-dLoi, 2048, loi+dLoi)
 
     def saveDataTxt(self):
         import datetime
