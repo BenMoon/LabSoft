@@ -195,6 +195,45 @@ class SignalFT(ObjectFT):
     def setup(self, toolbar):
         ObjectFT.setup(self, toolbar)
 
+
+class ImageFT(QSplitter):
+    def __init__(self, parent, plot):
+        super(ImageFT, self).__init__(Qt.Vertical, parent)
+        self.plot = plot
+        self.image = make.image(np.zeros((512, 2048)))
+        self.plot.add_item(self.image)
+        
+        self.hCursor = None
+        self.roi = None
+
+        self.scaleFun = lambda x: x
+        self.scaleFunInv = lambda x: x
+
+    #@Slot(object)
+    def updatePlot(self, data, title=''):
+        '''New data arrived and thus update the plot'''
+        self.image.set_data(data)
+        self.plot.setTitle(title)
+        self.plot.replot()
+
+    def getData(self, fun):
+        pass
+        #x, y = self.curve.get_data()
+        #return fun(x), y
+        
+    def addHCursor(self, i):
+        self.hCursor = make.hcursor(i)
+        self.plot.add_item(self.hCursor)
+    def setHCursor(self, i):
+        self.hCursor.setYValue(i)
+
+    def addRoi(self, x0=0, y0=0, x1=1, y1=1):
+        self.roi = make.rectangle(x0, y0, x1, y1, "ROI")
+        self.plot.add_item(self.roi)
+    def setRoi(self, x0, y0, x1, y1):
+        self.roi.set_rect(x0, y0, x1, y1)
+
+
 class XAxeCalc(QComboBox):
     idxChanged = Signal(object)
     def __init__(self, parent):
