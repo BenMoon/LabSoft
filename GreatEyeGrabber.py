@@ -13,7 +13,7 @@ from guidata.qt.QtGui import (QMainWindow, QMessageBox,
                               QVBoxLayout, QGridLayout,  
                               QTabWidget, QLabel, QLineEdit,  
                               QFont, QIcon)
-from guidata.qt.QtCore import (Qt, Signal, QThread, QLocale)
+from guidata.qt.QtCore import (Qt, Signal, QThread, QLocale, QDir)
 from guidata.qt import PYQT5
 #from guidata.qt.compat import getopenfilenames, getsavefilename
 #from guiqwt.signals import SIG_MARKER_CHANGED
@@ -41,9 +41,9 @@ from guiqwt.plot import CurveWidget, ImageWidget
 from guiqwt.config import _
 
 # local imports
+from scipy.io import savemat
 from Helpers.plotSignal import SignalFT, ImageFT, DockablePlotWidget
 from Helpers.genericthread import GenericWorker
-from Helpers.fileui import FileUi
 from Instruments.greatEyes import GreatEyesUi
 
 # set default language to c, so decimal point is '.' not ',' on german systems
@@ -142,11 +142,14 @@ class MainWindow(QMainWindow):
 
         ##############
         # Main window widgets
+        # status bar
+        self.status = self.statusBar()
+        # widgets
         self.tabwidget = DockableTabWidget(self)
         #self.tabwidget.setMaximumWidth(500)
         self.greateyesUi = GreatEyesUi(self)
-        self.tabwidget.addTab(self.greateyesUi, QIcon('icons/Handyscope_HS4.png'),
-                              _("greateyes"))
+        self.tabwidget.addTab(self.greateyesUi, 
+                QIcon('icons/Handyscope_HS4.png'), _("greateyes"))
         #self.fileUi = FileUi(self)
         #self.tabwidget.addTab(self.fileUi, get_icon('filesave.png'), _('File'))
         self.add_dockwidget(self.tabwidget, _("Inst. sett."))
@@ -158,9 +161,8 @@ class MainWindow(QMainWindow):
 
         ################
         # connect signals
-        self.greateyesUi.newPlotData.connect(lambda x: 
-                self.image1.updatePlot(x, datetime.datetime.now().isoformat()))
-        self.greateyesUi.newPlotData.connect(self.updateLineOut)
+        self.greateyesUi.newPlotData.connect(self.newData)
+        self.greateyesUi.message.connect(self.updateStatus)
         #self.curveWidget1.calcFun.idxChanged.connect(self.signal1.funChanged)
         #self.fileUi.saveTxtBtn.released.connect(self.saveDataTxt)
         #self.fileUi.saveHdfBtn.released.connect(self.saveDataHDF5)
@@ -249,6 +251,17 @@ class MainWindow(QMainWindow):
             self.console.exit_interpreter()
         event.accept()
 
+    def newData(self, image, timeStamp):
+        self.image1.updatePlot(image, 
+                timeStamp.isoformat() + ", " +
+                str(self.greateyesUi.cameraSettings['temperature']) +
+                "°C")
+        self.updateLineOut(image)
+        self.saveDataHDF5(image, timeStamp)
+
+    def updateStatus(self, msg):
+        self.status.showMessage(msg, 10000)
+
     def updateLineOut(self, image):
         loi  = self.greateyesUi.loi.value()
         dLoi = self.greateyesUi.deltaPixels.value()
@@ -258,69 +271,26 @@ class MainWindow(QMainWindow):
         self.image1.setHCursor(loi)
         self.image1.setRoi(0, loi-dLoi, 2048, loi+dLoi)
 
-    def saveDataTxt(self):
-        import datetime
-        now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S_Maestro')
-
-        # save time domain
-        foo = self.tdWidget.calcFun.functions
-        texts = [self.tdWidget.calcFun.itemText(i) for i in range(len(foo))]
-        tmp = ['td_x_{:s},td_y_{:s}'.format(i, i) for i in texts] 
-        header = ','.join(tmp)
-        dataTd = np.zeros((self.tdSignal.getData(foo[0][0])[0].shape[0],
-                          2*len(foo)))
-        for i, fun in enumerate(foo):
-            x, y =  self.tdSignal.getData(fun[0])# [0]: fun, [1]: inverse fun
-            dataTd[:,2*i] = x
-            dataTd[:,2*i+1] = y
-        np.savetxt('data/{:s}_TD.txt'.format(now), dataTd, header=header)
-        self.tdSignal.plot.save_widget('data/{:s}_TD.png'.format(now))
-        
-        # save frequency domain
-        foo = self.fdWidget.calcFun.functions
-        texts = [self.fdWidget.calcFun.itemText(i) for i in range(len(foo))]
-        tmp = ['fd_x_{:s},fd_y_{:s}'.format(i, i) for i in texts] 
-        header += ','.join(tmp)
-        dataFd = np.zeros((self.fdSignal.getData(foo[0][0])[0].shape[0],
-                          2*len(foo)))
-        for i, fun in enumerate(foo):
-            x, y = self.fdSignal.getData(fun[0])
-            dataFd[:,2*i] = x
-            dataFd[:,2*i+1] = y
-        np.savetxt('data/{:s}_FD.txt'.format(now), dataFd, header=header)
-        self.fdSignal.plot.save_widget('data/{:s}_FD.png'.format(now))
-
-        # TODO: maybe put this in status bar
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Information)
-        msg.setText('Data saved')
-        msg.exec_()
                
-    def saveDataHDF5(self):
-        import datetime
-        import h5py
-
-        fileName = self.fileUi.fileName
+    def saveDataHDF5(self, image, timeStamp):
+        if not self.greateyesUi.autoSave.isChecked():
+            return
+        zeit = timeStamp.strftime('%Y%m%d-%H%M%S')
+        fileName = self.greateyesUi.directory + "/" + zeit
+        #fileName = QDir.toNativeSeparators(fileName)
         print(fileName)
-        if fileName is None:
-            now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S_Power')
-        else:
-            now = fileName + '_Power'
-        with h5py.File('data/{:s}.h5'.format(now), 'w') as f:
-            f.attrs['comments'] = self.fileUi.comment.toPlainText()
-            f.attrs['detector'] = ''
-            f.attrs['detector_settings'] = ''
 
-            # save powermeter data
-            dt = np.dtype([('iso_time', 'S26'), 
-                   ('seconds', np.float),
-                   ('power', np.float)])
-            data = np.asarray(self.maestroUi.measureData, dtype=dt)
-            dset = f.create_dataset('power', data=data)
-            dset.attrs['device'] = 'Gentec Maestro'
-            dset.attrs['device_serial'] = '1234'
-            self.signal1.plot.save_widget('data/{:s}.png'.format(now))    
+        # save matlab file
+        savemat(fileName, {'image': image, 
+            'comment': self.greateyesUi.comment.toPlainText(),
+            'camera_settings': self.greateyesUi.cameraSettings})
+        # save images
+        self.image1.plot.save_widget(fileName + '_image.png')
+        self.signal1.plot.save_widget(fileName + '_lineout.png')
 
+        self.status.showMessage(fileName + " saved", 10000)
+
+        
         # TODO: maybe put this in status bar
         '''
         msg = QMessageBox()
