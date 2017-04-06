@@ -13,6 +13,8 @@ should in principle work for all other greateys cameras
 import sys
 from ctypes import *
 import time
+import datetime
+import numpy as np
 
 from guidata.qt.QtGui import (QSplitter, QComboBox, QGridLayout, QLineEdit,
                               QIntValidator, QWidget, QPushButton,
@@ -28,12 +30,14 @@ class GreatEyesUi(QSplitter):
     '''
     Handling user interface to manage greateys cameras
     '''
-    newPlotData = Signal(object)
+    newPlotData = Signal(object, object)
+    message = Signal(object)
     def __init__(self, parent):
         super().__init__(parent)
 
         self.camera = None
-        self.directory = 'H:'
+        self.cameraSettings = None
+        self.directory = 'N:/4all/mpsd_drive/xtsfasta/Data'
 
         layoutWidget = QWidget()
         layout = QGridLayout()
@@ -50,9 +54,12 @@ class GreatEyesUi(QSplitter):
             "2.8 MHz",
             "250 kHz",
             "500 kHz"])
-        self.exposureTimeEdit = QLineEdit()
-        self.exposureTimeEdit.setText('1000') # default exposure 1s
-        self.exposureTimeEdit.setValidator(QIntValidator(1, 2**31)) # ms
+        self.exposureTimeSpin = QSpinBox()
+        self.exposureTimeSpin.setRange(1, 1e6)
+        self.exposureTimeSpin.setValue(1e3) # default exposure 1s
+        self.exposureTimeSpin.setSingleStep(100)
+        self.exposureTimeSpin.setSuffix(' ms')
+        #self.exposureTimeSpin.setValidator(QIntValidator(1, 2**31)) # ms
         self.binningXCombo = QComboBox()
         self.binningXCombo.addItems(["No binning",
                   "Binning of 2 columns",
@@ -73,9 +80,10 @@ class GreatEyesUi(QSplitter):
                   "Binning of 64 lines",
                   "Binning of 128 lines",
                   "Binning of 256 lines"])
-        self.temperatureEdit = QLineEdit()
-        self.temperatureEdit.setText("-10")
-        self.temperatureEdit.setValidator(QIntValidator(-100, 20))
+        self.temperatureSpin = QSpinBox()
+        self.temperatureSpin.setRange(-100, 20)
+        self.temperatureSpin.setValue(-10)
+        self.temperatureSpin.setSuffix('°C')
         self.updateInterEdit = QLineEdit()
         self.updateInterEdit.setText("2")
         self.updateInterEdit.setValidator(QIntValidator(1, 3600))
@@ -93,14 +101,14 @@ class GreatEyesUi(QSplitter):
         layout.addWidget(self.openCamBtn, 0, 1)
         layout.addWidget(QLabel('readout speed'), 1, 0)
         layout.addWidget(self.readoutSpeedCombo, 1, 1)
-        layout.addWidget(QLabel('exposure time (ms)'), 2, 0)
-        layout.addWidget(self.exposureTimeEdit, 2, 1)
+        layout.addWidget(QLabel('exposure time'), 2, 0)
+        layout.addWidget(self.exposureTimeSpin, 2, 1)
         layout.addWidget(QLabel('binning X'), 3, 0)
         layout.addWidget(self.binningXCombo, 3, 1)
         layout.addWidget(QLabel('binning Y'), 4, 0)
         layout.addWidget(self.binningYCombo, 4, 1)
-        layout.addWidget(QLabel('temperature (°C)'), 5, 0)
-        layout.addWidget(self.temperatureEdit, 5, 1)
+        layout.addWidget(QLabel('temperature'), 5, 0)
+        layout.addWidget(self.temperatureSpin, 5, 1)
         layout.addWidget(QLabel('update every n-seconds'), 6, 0)
         layout.addWidget(self.updateInterEdit, 6, 1)
         layout.addWidget(QLabel('Pixel of interest'), 7, 0)
@@ -121,6 +129,9 @@ class GreatEyesUi(QSplitter):
         # connect elements for functionality
         self.openCamBtn.released.connect(self.__openCam)
         self.getDirectory.released.connect(self.__chooseDir)
+        self.temperatureSpin.valueChanged.connect(self.__setTemperature)
+        self.exposureTimeSpin.valueChanged.connect(self.__setCamParameter)
+        self.readoutSpeedCombo.currentIndexChanged.connect(self.__setCamParameter)
         
         ################
         # thread for updating position
@@ -130,7 +141,15 @@ class GreatEyesUi(QSplitter):
         # This causes my_worker.run() to eventually execute in my_thread:
         self.currImage_worker = GenericWorker(self.__getCurrImage)
         self.currImage_worker.moveToThread(self.currImage_thread)
-       
+ 
+ 
+        self.readoutSpeedCombo.setEnabled(False)
+        self.exposureTimeSpin.setEnabled(False)
+        self.binningXCombo.setEnabled(False)
+        self.binningYCombo.setEnabled(False)
+        self.temperatureSpin.setEnabled(False)
+        self.updateInterEdit.setEnabled(False)
+      
 
 
     def __openCam(self):
@@ -141,17 +160,17 @@ class GreatEyesUi(QSplitter):
             msg.setText('Sorry, could not connect to camera :(\n' + 
                     self.camera.status)
             msg.exec_()
-            #return
+            return
         self.openCamBtn.setText('Camera connected')
+        self.message.emit('Camera connected')
         self.openCamBtn.setStyleSheet('QPushButton {color: green;}')
 
-        self.readoutSpeedCombo.setEnabled(False)
-        self.exposureTimeEdit.setEnabled(False)
-        self.exposureTimeEdit.setEnabled(False)
+        self.readoutSpeedCombo.setEnabled(True)
+        self.exposureTimeSpin.setEnabled(True)
         self.binningXCombo.setEnabled(False)
         self.binningYCombo.setEnabled(False)
-        self.temperatureEdit.setEnabled(False)
-        self.updateInterEdit.setEnabled(False)
+        self.temperatureSpin.setEnabled(True)
+        self.updateInterEdit.setEnabled(True)
 
         # start aquisition
         self.__startCurrImageThr()
@@ -161,7 +180,6 @@ class GreatEyesUi(QSplitter):
                 "Choose directory",
                 self.directory)
         self.dirPath.setText(self.directory)
-        print(self.directory)
 
 
     def __startCurrImageThr(self):
@@ -173,18 +191,46 @@ class GreatEyesUi(QSplitter):
         #while(self.currPosThr.isRunning()):
         #    time.sleep(0.03)
     def __getCurrImage(self):
-        from scipy import mgrid
-        import numpy as np
-        X, Y = mgrid[-256:256, -1024:1025]
+        #from scipy import mgrid
+        #import numpy as np
+        #X, Y = mgrid[-256:256, -1024:1025]
+        i = int(self.updateInterEdit.text())
         while True:
-            z = np.exp(-0.5*(X**2+Y**2)/np.random.uniform(30000, 40000))*np.cos(0.1*X+0.1*Y) 
-            self.newPlotData.emit(z)
-            time.sleep(int(self.updateInterEdit.text()))
+            # seconds over which to record a new image
+            imageIntervall = int(self.updateInterEdit.text())
+            # sleep for n seconds to check if intervall was changed
+            sleepy         = 1
+            if i >= imageIntervall:
+                # dummy image
+                #z = np.exp(-0.5*(X**2+Y**2)/np.random.uniform(30000, 40000))*np.cos(0.1*X+0.1*Y)
+                z = self.camera.getImage()
+                self.cameraSettings = {
+                        'temperature': self.camera.getTemperature(),
+                        'exposure_time': self.exposureTimeSpin.value(),
+                        'readout_speed': self.readoutSpeedCombo.currentText()}
+                self.newPlotData.emit(z, datetime.datetime.now())
+                i = 0 # restart counter
+            i += sleepy
+            time.sleep(sleepy)
 
+    def __setTemperature(self, temp):
+        self.camera.setTemperture(temp)
+        self.message.emit('Temperature set to {:d}°C'.format(temp))
+
+    def __setCamParameter(self, param):
+        self.camera.setCameraParameter(
+                self.readoutSpeedCombo.currentIndex(), 
+                self.exposureTimeSpin.value(), 
+                0, 0)
+        self.message.emit('Readout: {:s}, Exposure: {:d}, binningX: 0, binningY: 0'.format(self.readoutSpeedCombo.currentText(),
+               self.exposureTimeSpin.value()))
 
 
 class greatEyes:
     def __init__(self, readoutSpeed=0, exposureTime=1e3, binningX=0, binningY=0):
+        # Mutex
+        self.mutex =  QMutex()
+
         # load dll
         self.greateyesLib = WinDLL('greateyes.dll')
         self.tempCalibNumber = 42223# you get this number via software, camera info
@@ -272,17 +318,19 @@ class greatEyes:
                   3: 'WriteConfigTable failes',
                   7: 'Unknown ModelID',
                   8: 'Out of range'}
-        if camSettings(readSpeed, exposure, binningX, binningY, 
+        with QMutexLocker(self.mutex):
+            print(readoutSpeed, exposureTime, binningX, binningY)
+            if camSettings(readSpeed, exposure, binningX, binningY, 
                                  byref(numPixelInX), byref(numPixelInY),
                                  byref(pixelSize), byref(statusMsg), addr):
-            print('Set camera parameters status:', status[int(statusMsg.value)])
-            self.numPixelInX = int(numPixelInX.value)
-            self.numPixelInY = int(numPixelInY.value)
-            self.pixelSize = int(pixelSize.value)
-            return True
-        else:
-            print('Set camera parameters status:', status[int(statusMsg.value)])
-            return False
+                print('Set camera parameters status:', status[int(statusMsg.value)])
+                self.numPixelInX = int(numPixelInX.value)
+                self.numPixelInY = int(numPixelInY.value)
+                self.pixelSize = int(pixelSize.value)
+                return True
+            else:
+                print('Set camera parameters status:', status[int(statusMsg.value)])
+                return False
         
         
     def initTempControl(self):
@@ -307,10 +355,11 @@ class greatEyes:
         tempList = np.arange(20, -101, -5) # available tempertures I extracted from greatVision sw
         tempIndex = tempList.shape[0]-tempList[::-1].searchsorted(setTemp)
         print(u'Setting temperature to {:d}°C'.format(tempList[tempIndex]))
-        if setTemperatureControl(c_int(tempIndex), byref(statusMsg), c_int(0)):
-            print('Camera temperature controller is set')
-        else:
-            print('An error occured in setting the temperature')
+        with QMutexLocker(self.mutex):
+            if setTemperatureControl(c_int(tempIndex), byref(statusMsg), c_int(0)):
+                print('Camera temperature controller is set')
+            else:
+                print('An error occured in setting the temperature')
 
     def getTemperature(self):
         ###
@@ -320,8 +369,9 @@ class greatEyes:
         getTemperature.argtypes = [c_int, POINTER(c_int), POINTER(c_int), c_int]
         temperature = c_int()
         statusMsg   = c_int()
-        if getTemperature(c_int(0), byref(temperature), byref(statusMsg), c_int(0)):
-            return temperature.value
+        with QMutexLocker(self.mutex):
+            if getTemperature(c_int(0), byref(temperature), byref(statusMsg), c_int(0)):
+                return temperature.value
         #getTemperatureBool = getTemperature(c_int(1), byref(temperature), byref(statusMsg), c_int(0))
         #print("backside temperature:", temperature.value)
 
@@ -346,13 +396,14 @@ class greatEyes:
         readBytes   = c_int()
         statusMsg   = c_int()
         addr        = c_int(0)
-        getImageBool = getImage(correctBias, showSync, showShutter, triggerMode, triggerTimeout,
+        with QMutexLocker(self.mutex):
+            getImageBool = getImage(correctBias, showSync, showShutter, triggerMode, triggerTimeout,
                                 pIndataStart, byref(writeBytes), byref(readBytes),
                                 byref(statusMsg), addr)
-        imageData = np.array(np.ones(self.numPixelInX * self.numPixelInY), dtype=np.short)
-        for i in range(self.numPixelInX * self.numPixelInY):
-            imageData[i] = pIndataStart[i]
-        return imageData.reshape(self.numPixelInY, self.numPixelInX)[:,::-1]
+            imageData = np.array(np.ones(self.numPixelInX * self.numPixelInY), dtype=np.short)
+            for i in range(self.numPixelInX * self.numPixelInY):
+                imageData[i] = pIndataStart[i]
+            return imageData.reshape(self.numPixelInY, self.numPixelInX)[:,::-1]
         #from guiqwt import pyplot
         #pyplot.imshow(imageData)
         #pyplot.show()
@@ -361,10 +412,11 @@ class greatEyes:
     def closeCamera(self):
         ###
         # close camera
-        closeCamera = self.greateyesLib.CloseCamera
-        closeCamera.retype = c_bool
-        closeCamera.argtype = [c_int, c_bool]
-        closeCameraBool = closeCamera(c_int(0), c_bool(False))
+        with QMutexLocker(self.mutex):
+            closeCamera = self.greateyesLib.CloseCamera
+            closeCamera.retype = c_bool
+            closeCamera.argtype = [c_int, c_bool]
+            closeCameraBool = closeCamera(c_int(0), c_bool(False))
 
         
 def main():
