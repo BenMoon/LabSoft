@@ -226,12 +226,15 @@ class ImageFT(QSplitter):
         self.plot.add_item(self.hCursor)
     def setHCursor(self, i):
         self.hCursor.setYValue(i)
+    def getHCursor(self):
+        return self.hCursor.yValue()
 
     def addRoi(self, x0=0, y0=0, x1=1, y1=1):
         self.roi = make.rectangle(x0, y0, x1, y1, "ROI")
         self.plot.add_item(self.roi)
     def setRoi(self, x0, y0, x1, y1):
         self.roi.set_rect(x0, y0, x1, y1)
+        self.plot.replot()
 
 
 class XAxeCalc(QComboBox):
