@@ -134,7 +134,7 @@ class MainWindow(QMainWindow):
         curveplot_toolbar = self.addToolBar(_("Curve Plotting Toolbar"))
         self.curveWidget1 = DockablePlotWidget(self, CurveWidget,
                                               curveplot_toolbar)
-        self.curveWidget1.calcFun.addFun('s', lambda x: x,
+        self.curveWidget1.calcFun.addFun('Pixels', lambda x: x,
                                               lambda x: x)
         plot1 = self.curveWidget1.get_plot()
         self.signal1 = SignalFT(self, plot=plot1)
