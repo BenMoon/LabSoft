@@ -163,6 +163,10 @@ class MainWindow(QMainWindow):
         # connect signals
         self.greateyesUi.newPlotData.connect(self.newData)
         self.greateyesUi.message.connect(self.updateStatus)
+        self.image1.plot.SIG_MARKER_CHANGED.connect(self.cursorMoved)
+        self.greateyesUi.loi.valueChanged.connect(self.cursorMoved)
+        self.greateyesUi.deltaPixels.valueChanged.connect(self.cursorMoved)
+
         #self.curveWidget1.calcFun.idxChanged.connect(self.signal1.funChanged)
         #self.fileUi.saveTxtBtn.released.connect(self.saveDataTxt)
         #self.fileUi.saveHdfBtn.released.connect(self.saveDataHDF5)
@@ -298,6 +302,16 @@ class MainWindow(QMainWindow):
         msg.setText('Data saved')
         msg.exec_()
         '''
+
+    def cursorMoved(self, mouse):
+        if not isinstance(mouse, int): # true if cursor moved by mouse
+            cursorVal = int(self.image1.getHCursor())
+            self.greateyesUi.loi.setValue(cursorVal)
+        else:
+            cursorVal = self.greateyesUi.loi.value()  
+        self.image1.setHCursor(cursorVal)
+        roi = self.greateyesUi.deltaPixels.value()
+        self.image1.setRoi(0, cursorVal-roi, 2048, cursorVal+roi)
 
 
 def run():
