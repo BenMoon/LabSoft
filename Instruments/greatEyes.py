@@ -86,9 +86,12 @@ class GreatEyesUi(QSplitter):
         self.temperatureSpin.setRange(-100, 20)
         self.temperatureSpin.setValue(-10)
         self.temperatureSpin.setSuffix('°C')
-        self.updateInterEdit = QLineEdit()
-        self.updateInterEdit.setText("2")
-        self.updateInterEdit.setValidator(QIntValidator(1, 3600))
+        self.updateInterSpin = QSpinBox()
+        self.updateInterSpin.setRange(1, 3600)
+        self.updateInterSpin.setValue(5)
+        self.updateInterSpin.setSuffix(' s')
+        #self.updateInterSpin.setText("2")
+        #self.updateInterEdit.setValidator(QIntValidator(1, 3600))
         self.loi = QSpinBox()
         self.loi.setRange(1, 511) # one pixel less as the camera has
         self.deltaPixels = QSpinBox()
@@ -113,7 +116,7 @@ class GreatEyesUi(QSplitter):
         layout.addWidget(QLabel('temperature'), 5, 0)
         layout.addWidget(self.temperatureSpin, 5, 1)
         layout.addWidget(QLabel('update every n-seconds'), 6, 0)
-        layout.addWidget(self.updateInterEdit, 6, 1)
+        layout.addWidget(self.updateInterSpin, 6, 1)
         layout.addWidget(QLabel('Pixel of interest'), 7, 0)
         layout.addWidget(self.loi, 7, 1)
         layout.addWidget(QLabel('Δ pixels'), 8, 0)
@@ -152,7 +155,7 @@ class GreatEyesUi(QSplitter):
         self.binningXCombo.setEnabled(False)
         self.binningYCombo.setEnabled(False)
         self.temperatureSpin.setEnabled(False)
-        self.updateInterEdit.setEnabled(False)
+        self.updateInterSpin.setEnabled(False)
       
 
 
@@ -174,7 +177,7 @@ class GreatEyesUi(QSplitter):
         self.binningXCombo.setEnabled(False)
         self.binningYCombo.setEnabled(False)
         self.temperatureSpin.setEnabled(True)
-        self.updateInterEdit.setEnabled(True)
+        self.updateInterSpin.setEnabled(True)
 
         self.openCamBtn.setEnabled(False)
         self.startAquBtn.setEnabled(True) 
@@ -190,8 +193,12 @@ class GreatEyesUi(QSplitter):
         if not self.aquireData:
             self.aquireData = True
             self.currImage_worker.start.emit()
+            self.startAquBtn.setText('Stop aquisition')
+            self.message.emit('Starting aqusition')
         else:
             self.__stopCurrImageThr()
+            self.startAquBtn.setText('Start aquisition')
+            self.message.emit('Stopping aqusition')
     def __stopCurrImageThr(self):
         self.aquireData = False
         #while(self.currPosThr.isRunning()):
@@ -200,21 +207,23 @@ class GreatEyesUi(QSplitter):
         #from scipy import mgrid
         #import numpy as np
         #X, Y = mgrid[-256:256, -1024:1025]
-        i = int(self.updateInterEdit.text())
+        i = self.updateInterSpin.value()
         while self.aquireData:
             # seconds over which to record a new image
-            imageIntervall = int(self.updateInterEdit.text())
+            imageIntervall = self.updateInterSpin.value()
             # sleep for n seconds to check if intervall was changed
             sleepy = 1
             if i >= imageIntervall:
                 # dummy image
                 #z = np.exp(-0.5*(X**2+Y**2)/np.random.uniform(30000, 40000))*np.cos(0.1*X+0.1*Y)
                 z = self.camera.getImage()
+                timeStamp = datetime.datetime.now()
                 self.cameraSettings = {
                         'temperature': self.camera.getTemperature(),
                         'exposure_time': self.exposureTimeSpin.value(),
-                        'readout_speed': self.readoutSpeedCombo.currentText()}
-                self.newPlotData.emit(z, datetime.datetime.now())
+                        'readout_speed': self.readoutSpeedCombo.currentText()
+                        'time_stamp': timeStamp}
+                self.newPlotData.emit(z, timeStamp)
                 i = 0 # restart counter
             i += sleepy
             time.sleep(sleepy)
