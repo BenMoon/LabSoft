@@ -37,6 +37,7 @@ class GreatEyesUi(QSplitter):
 
         self.camera = None
         self.cameraSettings = None
+        self.aquireData = False
         self.directory = 'N:/4all/mpsd_drive/xtsfasta/Data'
 
         layoutWidget = QWidget()
@@ -46,6 +47,7 @@ class GreatEyesUi(QSplitter):
         ###############
         # GUI elements
         self.openCamBtn = QPushButton('Connect camera')
+        self.startAquBtn = QPushButton('Start aquisiton')
         self.readoutSpeedCombo = QComboBox()
         # this really should not be hard coded but received from dll
         self.readoutSpeedCombo.addItems(["1 MHz", 
@@ -98,7 +100,8 @@ class GreatEyesUi(QSplitter):
 
         ##############
         # put elements in layout
-        layout.addWidget(self.openCamBtn, 0, 1)
+        layout.addWidget(self.openCamBtn, 0, 0)
+        layout.addWidget(self.startAquBtn, 0, 1)
         layout.addWidget(QLabel('readout speed'), 1, 0)
         layout.addWidget(self.readoutSpeedCombo, 1, 1)
         layout.addWidget(QLabel('exposure time'), 2, 0)
@@ -132,6 +135,7 @@ class GreatEyesUi(QSplitter):
         self.temperatureSpin.valueChanged.connect(self.__setTemperature)
         self.exposureTimeSpin.valueChanged.connect(self.__setCamParameter)
         self.readoutSpeedCombo.currentIndexChanged.connect(self.__setCamParameter)
+        self.startAquBtn.released.connect(self.__startCurrImageThr)
         
         ################
         # thread for updating position
@@ -142,7 +146,7 @@ class GreatEyesUi(QSplitter):
         self.currImage_worker = GenericWorker(self.__getCurrImage)
         self.currImage_worker.moveToThread(self.currImage_thread)
  
- 
+        self.startAquBtn.setEnabled(False) 
         self.readoutSpeedCombo.setEnabled(False)
         self.exposureTimeSpin.setEnabled(False)
         self.binningXCombo.setEnabled(False)
@@ -161,7 +165,7 @@ class GreatEyesUi(QSplitter):
                     self.camera.status)
             msg.exec_()
             return
-        self.openCamBtn.setText('Camera connected')
+        self.openCamBtn.setText('Connected')
         self.message.emit('Camera connected')
         self.openCamBtn.setStyleSheet('QPushButton {color: green;}')
 
@@ -172,8 +176,8 @@ class GreatEyesUi(QSplitter):
         self.temperatureSpin.setEnabled(True)
         self.updateInterEdit.setEnabled(True)
 
-        # start aquisition
-        self.__startCurrImageThr()
+        self.openCamBtn.setEnabled(False)
+        self.startAquBtn.setEnabled(True) 
 
     def __chooseDir(self):
         self.directory = QFileDialog.getExistingDirectory(self,
@@ -183,11 +187,13 @@ class GreatEyesUi(QSplitter):
 
 
     def __startCurrImageThr(self):
-        #self.stopCurrPosThr = False
-        self.currImage_worker.start.emit()
+        if not self.aquireData:
+            self.aquireData = True
+            self.currImage_worker.start.emit()
+        else:
+            self.__stopCurrImageThr()
     def __stopCurrImageThr(self):
-        pass
-        #self.stopCurrPosThr = True
+        self.aquireData = False
         #while(self.currPosThr.isRunning()):
         #    time.sleep(0.03)
     def __getCurrImage(self):
@@ -195,11 +201,11 @@ class GreatEyesUi(QSplitter):
         #import numpy as np
         #X, Y = mgrid[-256:256, -1024:1025]
         i = int(self.updateInterEdit.text())
-        while True:
+        while self.aquireData:
             # seconds over which to record a new image
             imageIntervall = int(self.updateInterEdit.text())
             # sleep for n seconds to check if intervall was changed
-            sleepy         = 1
+            sleepy = 1
             if i >= imageIntervall:
                 # dummy image
                 #z = np.exp(-0.5*(X**2+Y**2)/np.random.uniform(30000, 40000))*np.cos(0.1*X+0.1*Y)
